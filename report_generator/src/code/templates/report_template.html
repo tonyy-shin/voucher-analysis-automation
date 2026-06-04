@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<style>
+  {% if font_uri %}
+  @font-face {
+    font-family: 'MalgunGothic';
+    src: url('{{ font_uri }}');
+  }
+  {% endif %}
+
+  @page {
+    size: A4 landscape;
+    margin: 1.5cm 1.5cm 1.5cm 1.5cm;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    font-family: {% if font_uri %}'MalgunGothic', {% endif %}sans-serif;
+    font-size: 8.5pt;
+    color: #000;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* ── 공통 테이블 스타일 ── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    margin-bottom: 4px;
+  }
+  td, th {
+    border: 1px solid #000;
+    padding: 2px 4px;
+    vertical-align: middle;
+  }
+
+  /* ── 색상 클래스 ── */
+  .yellow   { background-color: #FFFF00; }
+  .total    { background-color: #D9D9D9; font-weight: bold; }
+  .sec-title{ background-color: #F2F2F2; font-weight: bold; }
+  .col-hdr  { background-color: #E8E8E8; font-weight: bold; text-align: center; }
+
+  /* ── 정렬 ── */
+  .num    { text-align: right; }
+  .center { text-align: center; }
+  .bold   { font-weight: bold; }
+
+  /* ── 헤더 테이블: 테두리 없음 ── */
+  .no-border td { border: none; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════
+     상단 헤더: 타이틀 + 로고 (2열 테이블)
+═══════════════════════════════════════════════ -->
+<table class="no-border" style="margin-bottom:6px;">
+  <tr>
+    <td style="border:none; width:75%; vertical-align:middle;">
+      <p style="font-size:13pt; font-weight:bold; margin:0 0 3px 0;">[ 사업비 전표 분석 ]</p>
+      <p style="font-size:7.5pt; color:red; margin:0;">
+        요청사항: 아래 노란색 영역에 해당 내용 기재. 단, Cell 위치 조정 금지(크기 조정은 가능함.)
+      </p>
+    </td>
+    <td style="border:none; width:25%; text-align:right; vertical-align:middle;">
+      <img src="{{ abl_logo_src }}" style="height:30px; width:auto; margin-right:6px;" />
+      <img src="{{ wf_logo_src }}" style="height:30px; width:auto;" />
+    </td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════
+     기본 계정 정보
+═══════════════════════════════════════════════ -->
+<table style="margin-bottom:4px;">
+  <colgroup>
+    <col style="width:15%;" /><col style="width:14%;" /><col style="width:14%;" /><col style="width:10%;" />
+    <col style="width:14%;" /><col style="width:14%;" /><col style="width:19%;" />
+  </colgroup>
+  <tr>
+    <td class="col-hdr">Account</td>
+    <td class="col-hdr">Account Code</td>
+    <td class="col-hdr">Account Name</td>
+    <td class="col-hdr"></td>
+    <td class="col-hdr">Group Code</td>
+    <td class="col-hdr" colspan="2">Account Group Name</td>
+  </tr>
+  <tr>
+    <td class="yellow"></td>
+    <td class="yellow">{{ account_info.get('계정번호', '') }}</td>
+    <td class="yellow">{{ account_info.get('계정명', '') }}</td>
+    <td class="yellow"></td>
+    <td class="yellow">{{ account_info.get('계정그룹ID', '') }}</td>
+    <td class="yellow" colspan="2">{{ account_info.get('계정그룹명', '') }}</td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════
+     1. 대상정의
+═══════════════════════════════════════════════ -->
+<table style="margin-bottom:4px;">
+  <colgroup>
+    <col style="width:15%;" /><col style="width:14%;" /><col style="width:14%;" /><col style="width:10%;" />
+    <col style="width:14%;" /><col style="width:14%;" /><col style="width:19%;" />
+  </colgroup>
+  <tr>
+    <td class="sec-title" colspan="7">1. 대상정의</td>
+  </tr>
+  <tr>
+    <td class="bold">대상정의</td>
+    <td class="yellow" colspan="6">{{ account_info.get('대상정의', '') }}</td>
+  </tr>
+  <tr>
+    <td class="bold">범위</td>
+    <td class="yellow" colspan="6">{{ account_info.get('범위', '') }}</td>
+  </tr>
+  <tr>
+    <td class="bold">지급대상</td>
+    <td class="yellow" colspan="6">{{ account_info.get('지급대상', '') }}</td>
+  </tr>
+  <tr>
+    <td class="bold">산출기준</td>
+    <td class="yellow" colspan="6">{{ account_info.get('산출기준', '') }}</td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════
+     2. 부점귀속 현황
+═══════════════════════════════════════════════ -->
+<table style="margin-bottom:4px;">
+  <colgroup>
+    <col style="width:15%;" /><col style="width:14%;" /><col style="width:14%;" /><col style="width:10%;" />
+    <col style="width:14%;" /><col style="width:14%;" /><col style="width:19%;" />
+  </colgroup>
+  <tr>
+    <td class="sec-title" colspan="7">2. 부점귀속 현황</td>
+  </tr>
+  <tr>
+    <td colspan="7" style="font-size:7.5pt; font-style:italic;">
+      : 주관부서 귀속은 전표 발의 및 예산 통제 조직 기준이며, 실제 사용부서 귀속은 업무 수행 및 비용 효익이 실질적으로 귀속되는 조직 기준.
+    </td>
+  </tr>
+  <tr>
+    <td class="col-hdr" rowspan="2" style="text-align:center;">부점별<br/>(지역단별)<br/>귀속현황</td>
+    <td class="col-hdr" colspan="3">주관부서 귀속</td>
+    <td class="col-hdr" colspan="3">실제 사용부서 귀속</td>
+  </tr>
+  <tr>
+    <td class="col-hdr">부점명</td>
+    <td class="col-hdr">대상금액(단위: 원)</td>
+    <td class="col-hdr">구성비(%)</td>
+    <td class="col-hdr">부점명</td>
+    <td class="col-hdr">대상금액(단위: 원)</td>
+    <td class="col-hdr">구성비(%)</td>
+  </tr>
+  {% for i in range(max_dept_rows) %}
+  <tr>
+    <td></td>
+    <td>{{ dept_주관[i]['부서명'] if i < dept_주관|length else '' }}</td>
+    <td class="num">{{ dept_주관[i]['대상금액'] if i < dept_주관|length else '' }}</td>
+    <td class="num">{{ dept_주관[i]['구성비(%)'] if i < dept_주관|length else '' }}</td>
+    <td>{{ dept_사용[i]['부서명'] if i < dept_사용|length else '' }}</td>
+    <td class="num">{{ dept_사용[i]['대상금액'] if i < dept_사용|length else '' }}</td>
+    <td class="num">{{ dept_사용[i]['구성비(%)'] if i < dept_사용|length else '' }}</td>
+  </tr>
+  {% endfor %}
+  <tr class="total">
+    <td class="center">총계</td>
+    <td></td>
+    <td class="num">{{ total_주관_amt }}</td>
+    <td></td>
+    <td></td>
+    <td class="num">{{ total_사용_amt }}</td>
+    <td></td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════
+     3. 부점별 성격분류
+═══════════════════════════════════════════════ -->
+<table style="margin-bottom:4px;">
+  <colgroup>
+    <col style="width:15%;" /><col style="width:14%;" /><col style="width:14%;" /><col style="width:10%;" />
+    <col style="width:14%;" /><col style="width:14%;" /><col style="width:19%;" />
+  </colgroup>
+  <tr>
+    <td class="sec-title" colspan="7">3. 부점별 성격분류</td>
+  </tr>
+
+  <!-- 3-1 -->
+  <tr>
+    <td class="sec-title" colspan="7" style="padding-left:10px;">3-1. 직접비 간접비 분류 결과</td>
+  </tr>
+  <tr>
+    <td class="col-hdr">구분</td>
+    <td class="col-hdr" colspan="6">분류금액</td>
+  </tr>
+  <tr>
+    <td>직접비</td>
+    <td class="num" colspan="6">{{ direct_indirect.get('직접비', '') }}</td>
+  </tr>
+  <tr>
+    <td>간접비</td>
+    <td class="num" colspan="6">{{ direct_indirect.get('간접비', '') }}</td>
+  </tr>
+
+  <!-- 3-2 -->
+  <tr>
+    <td class="sec-title" colspan="7" style="padding-left:10px;">3-2. 성격별 분류 결과</td>
+  </tr>
+  <tr>
+    <td colspan="7" style="font-size:7.5pt; font-style:italic;">
+      : 성격 분류는 직접비 및 간접비로 구분된 금액을 대상으로 실제 사용부서의 업무 성격에 따라 분류한 결과.
+    </td>
+  </tr>
+  <tr>
+    <td class="col-hdr" rowspan="2" style="text-align:center;">부점별<br/>(지역단별)<br/>귀속현황</td>
+    <td class="col-hdr" colspan="6">실제 사용부서 귀속</td>
+  </tr>
+  <tr>
+    {% for col in nature_cols %}
+    <td class="col-hdr">{{ col }}</td>
+    {% endfor %}
+  </tr>
+  {% for row in nature_rows %}
+  <tr>
+    <td>{{ row.get('귀속_사용부서', '') }}</td>
+    {% for col in nature_cols %}
+    <td class="num">{{ row.get(col, '') }}</td>
+    {% endfor %}
+  </tr>
+  {% endfor %}
+  <tr class="total">
+    <td class="center">총계</td>
+    {% for col in nature_cols %}
+    <td class="num">{{ total_nature.get(col, '') }}</td>
+    {% endfor %}
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════
+     4. 분류 근거
+═══════════════════════════════════════════════ -->
+<table>
+  <colgroup>
+    <col style="width:15%;" /><col style="width:14%;" /><col style="width:14%;" /><col style="width:10%;" />
+    <col style="width:14%;" /><col style="width:14%;" /><col style="width:19%;" />
+  </colgroup>
+  <tr>
+    <td class="sec-title" colspan="7">4. 분류 근거</td>
+  </tr>
+  <tr>
+    <td class="bold">직 • 간접비</td>
+    <td colspan="6">{{ classification_basis.get('직간접비_근거', '총괄문서 참조') }}</td>
+  </tr>
+  <tr>
+    <td class="bold">성격별 분류</td>
+    <td colspan="6">{{ classification_basis.get('성격별_근거', '총괄문서 참조') }}</td>
+  </tr>
+</table>
+
+</body>
+</html>
