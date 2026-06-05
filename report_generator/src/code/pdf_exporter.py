@@ -1,6 +1,6 @@
 ﻿"""
 pdf_exporter.py
-역할: ReportLab Platypus로 A4 가로 PDF를 직접 생성한다.
+역할: ReportLab Platypus로 A4 세로 PDF를 직접 생성한다.
       template.pdf 레이아웃 스펙 기준으로 스타일 구성.
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ from reportlab.lib import colors
 from data_loader import NATURE_COLS, COL_SUBTOTAL, COL_TOTAL, COLUMN_MAP
 from company_theme import CompanyTheme
 from theme_manager import GRAY_DEFAULT
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm, mm
 from reportlab.pdfbase import pdfmetrics
@@ -76,8 +76,8 @@ def _resolve_font_paths() -> tuple[Path, Path]:
 
 _MALGUN_PATH, _MALGUNBD_PATH = _resolve_font_paths()
 
-# ── 페이지 (A4 가로, 여백 15mm) ────────────────────────────────────────────────
-_PAGE   = landscape(A4)
+# ── 페이지 (A4 세로, 여백 15mm) ────────────────────────────────────────────────
+_PAGE   = A4
 _MARGIN = 15 * mm
 _WIDTH  = _PAGE[0] - 2 * _MARGIN
 
