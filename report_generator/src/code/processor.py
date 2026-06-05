@@ -1,4 +1,4 @@
-"""
+﻿"""
 processor.py
 역할: Phase 1 데이터 파이프라인 — 필터링, 3중 LEFT JOIN, 다차원 집계.
       모든 수치 연산을 pandas에서 완료하고 결과값(Scalar)만 반환한다.
@@ -11,7 +11,6 @@ from __future__ import annotations
 import pandas as pd
 
 # data_loader에 정의된 컬럼 상수를 재사용 (중복 정의 방지)
-# [수정] FALLBACK_TEXT, COL_SUBTOTAL, COL_TOTAL, COL_TEAM 임포트 추가 (우선순위 2·3)
 from data_loader import (
     AMOUNT_COLS, NATURE_COLS,
     COLUMN_MAP,
@@ -19,20 +18,17 @@ from data_loader import (
     _SHEET_TRANSACTION, _SHEET_CCM, _SHEET_ACCOUNT, _SHEET_OUTPUT,
 )
 
-# ── 모듈 상수 ─────────────────────────────────────────────────────────────────
-# [수정] 힌트 최대 표시 개수 상수 분리 (우선순위 10)
-_MAX_HINT_ITEMS = 30
+_MAX_HINT_ITEMS = 30  # filter_by_keyword() 오류 메시지에 표시할 최대 코드 수
 
-# ── 분류근거 확정 텍스트 (PLAN_vF3.md §4.2) ──────────────────────────────
-# [수정] 직·간접비 근거는 별도 dict로 분리, 성격별 근거는 NATURE_COLS 기반 자동 병합 (우선순위 6)
+# ── 분류 근거 텍스트 ──────────────────────────────────────────────────────────
 # NATURE_COLS 항목 추가 시 _NATURE_BASIS_TEXTS에만 텍스트를 추가하면 자동 반영됨
 _DI_BASIS: dict[str, str] = {
     "직접비_근거": (
         "직접비: 해당 비용은 특정 업무 활동 또는 보험계약 단계와 직접적으로 대응되며, "
         "다른 비용과 객관적으로 구분하여 산출이 가능함."
     ),
-    "간접비_근거": (
-        "간접비: 다수의 업무 또는 계약 단계에 공통적으로 기여하는 성격을 가지며, "
+    "공통비_근거": (
+        "공통비: 다수의 업무 또는 계약 단계에 공통적으로 기여하는 성격을 가지며, "
         "별도의 합리적인 기준에 따라."
     ),
 }
@@ -114,7 +110,6 @@ def filter_by_keyword(df_actual: pd.DataFrame, keyword: str) -> pd.DataFrame:
     df_filtered = df_actual[mask].copy()
 
     if df_filtered.empty:
-        # [수정] 최대 표시 개수 상수 참조 (우선순위 10)
         unique_vals = sorted(df_actual[col].dropna().unique())
         hint_lines = "\n".join(f"  {v}" for v in unique_vals[:_MAX_HINT_ITEMS])
         ellipsis = f"\n  ... 외 {len(unique_vals) - _MAX_HINT_ITEMS}개" if len(unique_vals) > _MAX_HINT_ITEMS else ""
@@ -208,9 +203,8 @@ def enrich_data(
         if _out_right in df.columns and _out_right != _acct_left:
             df = df.drop(columns=[_out_right])
 
-    # ── JOIN 3 없거나 출력> 시트에 부서 컬럼 없을 때 계정정보 기반 fallback ──
-    # (template_logic_summary: 사용부서는 계정정보 "사용 부서"에서 확보 가능)
-    # [수정] "(미매칭)" → FALLBACK_TEXT (우선순위 2)
+    # JOIN 3 없거나 출력> 시트에 부서 컬럼 없을 때 계정정보 기반 fallback
+    # (사용부서는 계정정보 "사용 부서"에서 확보 가능)
     if COLUMN_MAP["귀속_사용부서"] not in df.columns and COLUMN_MAP["범위"] in df.columns:
         df[COLUMN_MAP["귀속_사용부서"]] = df[COLUMN_MAP["범위"]]
     if COLUMN_MAP["귀속_주관부서"] not in df.columns:
@@ -218,8 +212,7 @@ def enrich_data(
             COLUMN_MAP["귀속_사용부서"], pd.Series(FALLBACK_TEXT, index=df.index)
         )
 
-    # ── JOIN 후 텍스트 결측치 처리 ────────────────────────────────────────
-    # [수정] "계정명"/"귀속_*" → COLUMN_MAP 참조; "(미매칭)" → FALLBACK_TEXT (우선순위 2·5)
+    # JOIN 후 텍스트 결측치 처리
     text_fill_cols = [
         COLUMN_MAP["직간접구분"],       # 변경: 직간접구분 (CCM)
         COLUMN_MAP["직간접구분_계정"],  # 직/간접비 (계정정보)
@@ -287,7 +280,7 @@ def calc_dept_attribution(
             .sum()
             .rename(columns={dept_col: "부서명"})
         )
-        grouped = grouped[~grouped["부서명"].isin([FALLBACK_TEXT, ""])]  # [수정] 우선순위 2
+        grouped = grouped[~grouped["부서명"].isin([FALLBACK_TEXT, ""])]
         total = grouped["대상금액"].sum()
         grouped["구성비(%)"] = (
             grouped["대상금액"].div(total).mul(100).round(2) if total != 0 else 0.0
@@ -296,7 +289,6 @@ def calc_dept_attribution(
 
     def _build_from_team_match(dept_col_in_output: str) -> pd.DataFrame | None:
         """출력> 부서명 기준으로 팀 필터 집계. 조건 미충족 시 None 반환."""
-        # [수정] "팀" → COL_TEAM (우선순위 3)
         if (df_output is None or df_output.empty
                 or dept_col_in_output not in df_output.columns
                 or COL_TEAM not in df_enriched.columns):
@@ -306,9 +298,8 @@ def calc_dept_attribution(
         rows = []
         for dept in dept_list:
             dept_str = str(dept).strip()
-            if dept_str in ("", FALLBACK_TEXT):  # [수정] 우선순위 2
+            if dept_str in ("", FALLBACK_TEXT):
                 continue
-            # [수정] "합계" → COL_SUBTOTAL (우선순위 3)
             _amt_col = COL_SUBTOTAL if COL_SUBTOTAL in df_enriched.columns else "대상금액"
             amount = float(
                 df_enriched.loc[df_enriched[COL_TEAM] == dept_str, _amt_col].sum()
@@ -347,7 +338,6 @@ def calc_dept_attribution(
         F열과 G열 양쪽에 등록된 팀은 등장 횟수 다수결로 분류하고,
         동수이면 사용부서를 우선한다.
         """
-        # [수정] "팀" → COL_TEAM, "(미매칭)" → FALLBACK_TEXT, "합계" → COL_SUBTOTAL (우선순위 2·3)
         if (df_output_all is None or df_output_all.empty
                 or COL_TEAM not in df_enriched.columns):
             return empty.copy(), empty.copy()
@@ -426,32 +416,32 @@ def calc_dept_attribution(
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  Step 4 — 직접비 / 간접비 합계
+#  Step 4 — 직접비 / 공통비 합계
 # ════════════════════════════════════════════════════════════════════════════
 
 def calc_direct_indirect(df_enriched: pd.DataFrame) -> dict[str, float]:
     """
-    직간접비·총계를 계산한다.
+    직공통비·총계를 계산한다.
 
-    우선순위: 계정정보 '직/간접비' 컬럼 → CCM '변경: 직간접구분' 컬럼
+    우선순위: 계정정보 '직/간접비' 컬럼 → CCM '변경: 직접/공통 구분' 컬럼
     (template_logic_summary: 직간접 구분 기준은 계정정보)
 
-    '직접' / '간접' 텍스트를 str.contains()로 유연하게 매칭하여
+    '직접' / '공통' 텍스트를 str.contains()로 유연하게 매칭하여
     값 표기 방식 변형(예: '직접비', '직접 비용')에도 대응한다.
 
     Args:
         df_enriched: enrich_data()의 반환값
 
     Returns:
-        {'직접비': float, '간접비': float, '총계': float}
+        {'직접비': float, '공통비': float, '총계': float}
     """
     총계 = float(df_enriched["대상금액"].sum())
 
     # 계정정보 컬럼 우선, 없거나 유효값 없으면 CCM 컬럼 폴백
-    # 유효값 = "직접" 또는 "간접" 텍스트를 포함하는 값이 1개 이상
+    # 유효값 = "직접" 또는 "공통" 텍스트를 포함하는 값이 1개 이상
     acct_col = COLUMN_MAP["직간접구분_계정"]  # "직/간접비"
-    ccm_col  = COLUMN_MAP["직간접구분"]       # "변경: 직간접구분"
-    _VALID_PATTERN = r"직접|간접"
+    ccm_col  = COLUMN_MAP["직간접구분"]       # "변경: 직접/공통 구분"
+    _VALID_PATTERN = r"직접|공통"
     if (acct_col in df_enriched.columns
             and df_enriched[acct_col].astype(str)
                 .str.contains(_VALID_PATTERN, na=False).any()):
@@ -460,20 +450,20 @@ def calc_direct_indirect(df_enriched: pd.DataFrame) -> dict[str, float]:
         col = ccm_col
 
     if col not in df_enriched.columns:
-        return {"직접비": 0.0, "간접비": 0.0, "총계": 총계}
+        return {"직접비": 0.0, "공통비": 0.0, "총계": 총계}
 
     직접비 = float(
         df_enriched.loc[
             df_enriched[col].str.contains("직접", na=False), "대상금액"
         ].sum()
     )
-    간접비 = float(
+    공통비 = float(
         df_enriched.loc[
-            df_enriched[col].str.contains("간접", na=False), "대상금액"
+            df_enriched[col].str.contains("공통", na=False), "대상금액"
         ].sum()
     )
 
-    return {"직접비": 직접비, "간접비": 간접비, "총계": 총계}
+    return {"직접비": 직접비, "공통비": 공통비, "총계": 총계}
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -509,7 +499,6 @@ def calc_nature_classification(
     if not existing_nature:
         return pd.DataFrame()
 
-    # [수정] "팀" → COL_TEAM (우선순위 3)
     if (df_output_for_keyword is not None
             and not df_output_for_keyword.empty
             and COL_TEAM in df_enriched.columns):
@@ -559,7 +548,6 @@ def calc_nature_classification(
             .sum()
         )
 
-    # [수정] "합계" → COL_SUBTOTAL, "총계" → COL_TOTAL (우선순위 3)
     grouped[COL_SUBTOTAL] = grouped[existing_nature].sum(axis=1)
 
     # 누락된 성격 컬럼은 0으로 패딩 (템플릿 컬럼 수 고정 대응)
@@ -607,7 +595,7 @@ def extract_account_info(df_enriched: pd.DataFrame) -> dict[str, object]:
         {
             '계정번호':   str,   # 원가요소 코드
             '계정명':     str,   # 계정 이름
-            '직간접구분': str,   # '직접비' 또는 '간접비'
+            '직간접구분': str,   # '직접비' 또는 '공통비'
             '대상정의':   str,   # 대상정의 v3.0_0415
             '범위':       str,   # 사용부서
             '지급대상':   str,   # 비용 지급 범위
@@ -622,7 +610,6 @@ def extract_account_info(df_enriched: pd.DataFrame) -> dict[str, object]:
         series = series[series.astype(str).str.strip().isin(["", FALLBACK_TEXT]) == False]  # noqa: E712
         return str(series.iloc[0]).strip() if not series.empty else ""
 
-    # [수정] "계정명"/"계정그룹ID"/"계정그룹명" → COLUMN_MAP 참조 (우선순위 5)
     return {
         "계정번호":   _first_valid(COLUMN_MAP["원가요소"]),
         "계정명":     _first_valid(COLUMN_MAP["계정명"]),
@@ -658,7 +645,7 @@ def run_pipeline(
             'account_info':    dict,       # extract_account_info 결과
             'dept_주관':       DataFrame,  # 주관부서별 귀속 현황
             'dept_사용':       DataFrame,  # 사용부서별 귀속 현황
-            'direct_indirect': dict,       # 직접비·간접비·총계
+            'direct_indirect': dict,       # 직접비·공통비·총계
             'nature':          DataFrame,  # 성격별 × 부점 교차 집계
         }
 

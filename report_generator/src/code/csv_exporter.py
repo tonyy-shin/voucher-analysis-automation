@@ -77,13 +77,13 @@ def _load_template(path: str) -> list[list[str]]:
     for row in raw:
         padded = (row + [""] * _NUM_COLS)[:_NUM_COLS]
         result.append(padded)
-    _validate_template_structure(result)  # [방어] 구조 검증
+    _validate_template_structure(result)
     return result
 
 
 def _validate_template_structure(rows: list[list[str]]) -> None:
     """
-    [방어] template.csv 고정 셀 좌표에 접근할 수 있는지 사전 검증한다.
+    template.csv 고정 셀 좌표에 접근할 수 있는지 사전 검증한다.
 
     행 수가 부족하면 ValueError를 발생시키고,
     이미 값이 있는 셀은 경고 로그를 남겨 의도치 않은 덮어쓰기를 감지한다.
@@ -201,15 +201,15 @@ def _inject_direct_indirect(
     rows: list[list[str]], direct_indirect: dict
 ) -> list[list[str]]:
     """
-    직접비·간접비 금액을 텍스트 스캔으로 찾아 기입한다.
+    직접비·공통비 금액을 텍스트 스캔으로 찾아 기입한다.
     (dept splice 후 절대 행 인덱스가 바뀌므로 스캔 방식 사용)
     """
     rows = [r[:] for r in rows]
     for i, row in enumerate(rows):
         if row[1] == "직접비":
             rows[i][2] = _fmt(direct_indirect.get("직접비", 0))
-        elif row[1] == "간접비":
-            rows[i][2] = _fmt(direct_indirect.get("간접비", 0))
+        elif row[1] == "공통비":
+            rows[i][2] = _fmt(direct_indirect.get("공통비", 0))
     return rows
 
 
@@ -302,7 +302,7 @@ def _inject_classification_basis(
     4. 분류 근거 섹션에 CLASSIFICATION_BASIS 상수 텍스트를 기입한다.
 
     "4." + "근거" 포함 행 이후를 분류 근거 섹션으로 간주.
-    col 1에 "직" + "간접" 포함 행 → col 2에 직간접비_근거 텍스트
+    col 1에 "직" + "공통" 포함 행 → col 2에 직공통비_근거 텍스트
     col 1에 "성격별" + "분류" 포함 행 → col 2에 성격별_근거 텍스트
     """
     rows = [r[:] for r in rows]
@@ -312,8 +312,8 @@ def _inject_classification_basis(
             in_근거 = True
         if not in_근거:
             continue
-        if "직" in row[1] and "간접" in row[1]:
-            rows[i][2] = classification_basis.get("직간접비_근거", "")
+        if "직" in row[1] and "공통" in row[1]:
+            rows[i][2] = classification_basis.get("직공통비_근거", "")
         elif "성격별" in row[1] and "분류" in row[1]:
             rows[i][2] = classification_basis.get("성격별_근거", "")
     return rows

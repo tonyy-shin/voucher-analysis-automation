@@ -17,7 +17,6 @@ import pandas as pd
 from PIL import Image as PILImage
 from reportlab.lib import colors
 
-# [수정] data_loader에서 단일 원본 임포트 — 로컬 재정의 제거 (우선순위 1·3)
 from data_loader import NATURE_COLS, COL_SUBTOTAL, COL_TOTAL, COLUMN_MAP
 from company_theme import CompanyTheme
 from theme_manager import GRAY_DEFAULT
@@ -37,7 +36,6 @@ else:
     _BASE_DIR = Path(__file__).parents[3]
 
 # ── 폰트 경로 — 환경변수 > OS 자동 탐색 순으로 결정 ─────────────────────────
-# [수정] Windows 전용 하드코딩 제거, 환경변수/OS 분기 대응 (우선순위 8)
 def _resolve_font_paths() -> tuple[Path, Path]:
     """한글 폰트(일반/볼드) 경로를 반환한다.
 
@@ -89,11 +87,7 @@ _YELLOW = colors.HexColor('#FFFF00')   # 데이터 입력 셀 (미사용 유지)
 _BLACK  = colors.black
 _WHITE  = colors.white
 
-# [수정] NATURE_COLS 로컬 재정의 제거 — data_loader에서 임포트 (우선순위 1)
-# NATURE_COLS 는 파일 상단 임포트 블록에서 from data_loader import NATURE_COLS 로 가져옴
-
 # ── 헤더 테이블 컬럼 너비 상수 ───────────────────────────────────────────────
-# [수정] _tbl_header() 내부 계산식을 모듈 상수로 이동 (우선순위 10)
 _LOGO_CELL_W       = _WIDTH * 0.25                     # 헤더 로고 셀 전체 너비
 _COLS_HEADER_LOGO  = [_WIDTH * 0.12, _WIDTH * 0.13]   # 2-로고 서브테이블: 좌 | 우
 _COLS_HEADER_LOGO_3 = [_LOGO_CELL_W / 3] * 3          # 3-로고 서브테이블: 균등 3열
@@ -110,7 +104,7 @@ _COLS_2 = [0.22 * _WIDTH, 0.78 * _WIDTH]
 # [E][G] 7열 테이블: 비율 1.2:1:1.2:0.8:1:1.2:0.8
 _COLS_7 = [r / 7.2 * _WIDTH for r in [1.2, 1.0, 1.2, 0.8, 1.0, 1.2, 0.8]]
 
-# [F] 직접비/간접비 2열: 구분 20% | 분류금액 80%
+# [F] 직접비/공통비 2열: 구분 20% | 분류금액 80%
 _COLS_DI = [0.20 * _WIDTH, 0.80 * _WIDTH]
 
 # [H] 분류근거 3열: 라벨 18% | 내용 64% | 참조 18%
@@ -120,7 +114,6 @@ _COLS_BASIS = [0.18 * _WIDTH, 0.64 * _WIDTH, 0.18 * _WIDTH]
 # ── 폰트 등록 ──────────────────────────────────────────────────────────────────
 
 def _setup_fonts() -> tuple[str, str]:
-    # [수정] 탐색 실패 시 경고 출력 후 기본 폰트 fallback (우선순위 8)
     if 'MG' not in pdfmetrics._fonts:
         if _MALGUN_PATH and _MALGUN_PATH.exists():
             try:
@@ -451,22 +444,22 @@ def _tbl_dept(d주관: pd.DataFrame, d사용: pd.DataFrame, s: dict, fb: str) ->
     return [title, desc, Table(data, colWidths=_COLS_7, style=TableStyle(cmds))]
 
 
-# ── [F] 3. 부점별 성격분류 + 3-1. 직접비/간접비 분류 결과 ────────────────────
+# ── [F] 3. 부점별 성격분류 + 3-1. 직접비/공통비 분류 결과 ────────────────────
 
 def _tbl_nature_31(di: dict, s: dict) -> list:
     data = [
         [_P('구분', s['hdr']), _P('분류금액', s['hdr'])],
         [_P('직접비', s['bold']), _P(_fmt(di.get('직접비', 0)), s['right'])],
-        [_P('간접비', s['bold']), _P(_fmt(di.get('간접비', 0)), s['right'])],
+        [_P('공통비', s['bold']), _P(_fmt(di.get('공통비', 0)), s['right'])],
     ]
     cmds = _base_style() + [
         ('BACKGROUND', (0, 0), (1, 0), s['c_primary']),       # 헤더행
-        ('BACKGROUND', (0, 1), (0, 2), s['c_primary']),       # 라벨(직접비/간접비)
+        ('BACKGROUND', (0, 1), (0, 2), s['c_primary']),       # 라벨(직접비/공통비)
         ('BACKGROUND', (1, 1), (1, 2), colors.white),         # 값 셀: 흰색
     ]
     return [
         _P('3. 부점별 성격분류', s['sec']),
-        _P('3-1. 직접비 간접비 분류 결과', s['sec']),
+        _P('3-1. 직접비 공통비 분류 결과', s['sec']),
         Table(data, colWidths=_COLS_DI, style=TableStyle(cmds)),
     ]
 
@@ -474,8 +467,6 @@ def _tbl_nature_31(di: dict, s: dict) -> list:
 # ── [G] 3-2. 성격별 분류 결과 ──────────────────────────────────────────────────
 
 def _tbl_nature_32(nat: pd.DataFrame, s: dict, fb: str) -> list:
-    # [수정] NATURE_COLS + [COL_SUBTOTAL] 로 6종 헤더 구성 — 총 7열(_COLS_7)에 맞춤 (우선순위 1·3)
-    # data_loader.NATURE_COLS = 5종 성격, COL_SUBTOTAL("합계") 추가해 표시용 6종 만들기
     _display_cols = NATURE_COLS + [COL_SUBTOTAL]
 
     data = [
@@ -522,7 +513,7 @@ def _tbl_nature_32(nat: pd.DataFrame, s: dict, fb: str) -> list:
         cmds.append(('BACKGROUND', (0, first_data), (6, last_data), colors.white))
 
     title = _P('3-2. 성격별 분류 결과', s['sec'])
-    desc  = _P(': 성격 분류는 직접비 및 간접비로 구분된 금액을 대상으로 '
+    desc  = _P(': 성격 분류는 직접비 및 공통비로 구분된 금액을 대상으로 '
                '실제 사용부서의 업무 성격에 따라 분류한 결과.', s['small'])
     return [title, desc, Table(data, colWidths=_COLS_7, style=TableStyle(cmds))]
 
@@ -530,13 +521,13 @@ def _tbl_nature_32(nat: pd.DataFrame, s: dict, fb: str) -> list:
 # ── [H] 4. 분류 근거 ───────────────────────────────────────────────────────────
 
 def _tbl_basis(cb: dict, di: dict, nat: pd.DataFrame, s: dict) -> list:
-    # 직·간접비: 금액이 0이 아닌 항목의 설명만 포함
+    # 직·공통비: 금액이 0이 아닌 항목의 설명만 포함
     di_parts = []
     if di.get('직접비', 0) != 0:
         di_parts.append(cb.get('직접비_근거', ''))
-    if di.get('간접비', 0) != 0:
-        di_parts.append(cb.get('간접비_근거', ''))
-    직간접비_text = '<br/><br/>'.join(di_parts)
+    if di.get('공통비', 0) != 0:
+        di_parts.append(cb.get('공통비_근거', ''))
+    직공통비_text = '<br/><br/>'.join(di_parts)
 
     # 성격별 분류: 부점 데이터 행 기준 절댓값 합이 0이 아닌 항목의 설명만 포함
     # 총계 Net값이 0이더라도 상계된 부점이 존재하면 분류 근거를 출력해야 하므로
@@ -551,8 +542,8 @@ def _tbl_basis(cb: dict, di: dict, nat: pd.DataFrame, s: dict) -> list:
     성격별_text = '<br/><br/>'.join(nat_parts)
 
     data = [
-        [_P('직 • 간접비', s['bold']),
-         _P(직간접비_text, s['body']),
+        [_P('직 • 공통비', s['bold']),
+         _P(직공통비_text, s['body']),
          _P('총괄문서 참조', s['center'])],
         [_P('성격별 분류', s['bold']),
          _P(성격별_text, s['body']),

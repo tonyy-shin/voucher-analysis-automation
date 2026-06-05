@@ -18,16 +18,13 @@ _SHEET_ACCOUNT     = "계정정보"
 _SHEET_CCM         = "Cost Center Master"
 _SHEET_OUTPUT      = "출력>"
 
-# ── 헤더 탐색 범위 상수 — 모든 _find_*_header_row 함수에서 공통 사용 ─────────
-# [수정] 함수마다 흩어진 nrows=10/20 을 단일 상수로 통일 (우선순위 7)
+# 헤더 탐색 범위 — 모든 _find_*_header_row 함수에서 공통 사용
 _HEADER_SCAN_ROWS = 20
 
-# ── 공통 표시 문자열 — JOIN 미매칭 시 채워지는 텍스트 ────────────────────────
-# [수정] "(미매칭)" 상수 분리 — processor.py 등에서 임포트하여 사용 (우선순위 2)
+# JOIN 미매칭 시 채워지는 표시 텍스트
 FALLBACK_TEXT = "(미매칭)"
 
-# ── 공통 컬럼명 상수 — 파이프라인 전반에서 반복 사용되는 파생 컬럼명 ──────────
-# [수정] "합계"/"총계"/"팀" 상수 분리 (우선순위 3)
+# 파이프라인 전반에서 사용되는 파생 컬럼명 상수
 COL_SUBTOTAL = "합계"   # 행별 성격 합계 컬럼
 COL_TOTAL    = "총계"   # 집계 마지막 행의 부서명 값
 COL_TEAM     = "팀"     # 실제발생사업비 시트의 팀 컬럼
@@ -50,8 +47,8 @@ COLUMN_MAP: dict[str, str] = {
     "산출기준":           "산출기준",
     # Cost Center Master 컬럼
     "cc_code":            "Cost Center Code",
-    "cc_name":            "Cost Center name",   # [수정] COLUMN_MAP 등록 (우선순위 5)
-    "직간접구분":         "현행: 직간접 구분",
+    "cc_name":            "Cost Center name",
+    "직간접구분":         "변경: 직접/공통 구분",
     # 출력> 시트 컬럼
     "출력전표":           "출력전표",
     "귀속_주관부서":      "귀속_주관부서",
@@ -102,7 +99,7 @@ _REQUIRED_TRANSACTION_COLS: list[str] = [
 
 _REQUIRED_CCM_COLS: list[str] = [
     COLUMN_MAP["cc_code"],     # "Cost Center Code"     — JOIN 1 키
-    COLUMN_MAP["직간접구분"],  # "현행: 직간접 구분"     — 직간접 분류 기준
+    COLUMN_MAP["직간접구분"],  # "변경: 직접/공통 구분"    — 직간접 분류 기준
 ]
 
 _REQUIRED_ACCOUNT_COLS: list[str] = [
@@ -207,12 +204,12 @@ def load_all_sheets(wb_path: str, config: dict | None = None) -> dict[str, pd.Da
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  Phase 0 — 클렌징 핵심 함수 (vF3 신규)
+#  Phase 0 — 클렌징 핵심 함수
 # ════════════════════════════════════════════════════════════════════════════
 
 def cleanse_types(df: pd.DataFrame, join_key_cols: list[str]) -> pd.DataFrame:
     """
-    [원칙 4] JOIN 키 컬럼을 str 타입으로 강제 형변환한다.
+    JOIN 키 컬럼을 str 타입으로 강제 형변환한다.
 
     Excel에서 숫자로 저장된 코드(예: 1234)가 한쪽은 int, 다른 쪽은 str로 로드되면
     JOIN 결과가 전량 NaN으로 처리되는 조용한 버그가 발생한다.
@@ -241,7 +238,7 @@ def cleanse_types(df: pd.DataFrame, join_key_cols: list[str]) -> pd.DataFrame:
 
 def cleanse_whitespace(df: pd.DataFrame) -> pd.DataFrame:
     """
-    [원칙 5] object dtype 컬럼 전체에 .str.strip()을 적용한다.
+    object dtype 컬럼 전체에 .str.strip()을 적용한다.
 
     Excel 입력자가 실수로 삽입한 앞뒤 공백("직접비 ", " 계약비")이
     str.contains() 필터링 및 groupby 집계에서 해당 값을 누락시키거나
@@ -261,7 +258,7 @@ def cleanse_whitespace(df: pd.DataFrame) -> pd.DataFrame:
 
 def cleanse_nulls(df: pd.DataFrame, numeric_cols: list[str]) -> pd.DataFrame:
     """
-    [원칙 6] 숫자 컬럼의 NaN을 fillna(0)으로 처리한다.
+    숫자 컬럼의 NaN을 fillna(0)으로 처리한다.
 
     Excel 빈 셀은 NaN(float)으로 로드되며, sum()/groupby() 집계 시
     해당 행이 제외되거나 NaN이 전파되어 집계 오류를 유발한다.
@@ -285,7 +282,7 @@ def _validate_columns(
     sheet_name: str,
 ) -> None:
     """
-    [신규 방어] 필수 컬럼이 DataFrame에 모두 존재하는지 검증한다.
+    필수 컬럼이 DataFrame에 모두 존재하는지 검증한다.
 
     JOIN 키 컬럼이 없으면 merge() 결과가 전량 NaN이 되어 '(미매칭)'으로
     조용히 오염되는 문제를 사전에 차단한다.
@@ -348,19 +345,19 @@ def _preprocess_actual(df: pd.DataFrame) -> pd.DataFrame:
     if unnamed:
         df = df.drop(columns=unnamed)
 
-    # 1-b. 필수 컬럼 검증 [방어] — JOIN 키 누락 시 즉시 ValueError
+    # 필수 컬럼 검증 — JOIN 키 누락 시 즉시 ValueError
     _validate_columns(df, _REQUIRED_TRANSACTION_COLS, _SHEET_TRANSACTION)
 
     # 2. 금액 컬럼명 대소문자 정규화 (예: 'sum of da_p' → 'Sum of DA_P')
     df = _normalize_amount_col_names(df)
 
-    # 3. JOIN 키 형변환 [원칙 4]
+    # JOIN 키 형변환
     df = cleanse_types(df, [COLUMN_MAP["코스트센터"], COLUMN_MAP["원가요소"]])
 
-    # 4. 텍스트 공백 제거 [원칙 5]
+    # 텍스트 공백 제거
     df = cleanse_whitespace(df)
 
-    # 5. 숫자 결측치 처리 [원칙 6]
+    # 숫자 결측치 처리
     _numeric_cols = AMOUNT_COLS + NATURE_COLS
     if "합계" in df.columns:
         _numeric_cols = _numeric_cols + ["합계"]
@@ -381,13 +378,13 @@ def _preprocess_ccm(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = _rename_duplicate_code_cols(df)
 
-    # 필수 컬럼 검증 [방어] — JOIN 키 누락 시 즉시 ValueError
+    # 필수 컬럼 검증 — JOIN 키 누락 시 즉시 ValueError
     _validate_columns(df, _REQUIRED_CCM_COLS, _SHEET_CCM)
 
-    # JOIN 키 형변환 [원칙 4]
+    # JOIN 키 형변환
     df = cleanse_types(df, [COLUMN_MAP["cc_code"]])
 
-    # 텍스트 공백 제거 [원칙 5]
+    # 텍스트 공백 제거
     df = cleanse_whitespace(df)
 
     # 필요 컬럼만 선택
@@ -411,13 +408,13 @@ def _preprocess_account(df: pd.DataFrame) -> pd.DataFrame:
         2. cleanse_whitespace
         3. 필요 컬럼만 선택
     """
-    # 필수 컬럼 검증 [방어] — JOIN 키 누락 시 즉시 ValueError
+    # 필수 컬럼 검증 — JOIN 키 누락 시 즉시 ValueError
     _validate_columns(df, _REQUIRED_ACCOUNT_COLS, _SHEET_ACCOUNT)
 
-    # JOIN 키 형변환 [원칙 4]
+    # JOIN 키 형변환
     df = cleanse_types(df, [COLUMN_MAP["계정번호"]])
 
-    # 텍스트 공백 제거 [원칙 5]
+    # 텍스트 공백 제거
     df = cleanse_whitespace(df)
 
     available = [c for c in _get_account_cols_needed() if c in df.columns]
@@ -568,7 +565,7 @@ def _preprocess_output(
 
     result = pd.DataFrame(records)
 
-    # ── 5. 형변환·공백제거 [원칙 4·5] + "nan" 문자열 제거 ───────────────────
+    # ── 5. 형변환·공백제거 + "nan" 문자열 제거 ───────────────────────────────
     result = cleanse_types(result, [col_전표])
     result = cleanse_whitespace(result)
     for col in [col_주관_out, col_사용_out]:
@@ -627,7 +624,6 @@ def _find_actual_header_row(wb_path: str, sheet_name: str = _SHEET_TRANSACTION) 
         헤더 행 번호 (0-based). 탐지 실패 시 0 반환 (기존 동작 유지).
     """
     try:
-        # [수정] nrows=10 → _HEADER_SCAN_ROWS (우선순위 7)
         df_raw = pd.read_excel(wb_path, sheet_name=sheet_name, header=None, nrows=_HEADER_SCAN_ROWS)
         for i, row in df_raw.iterrows():
             vals = [str(v).strip() for v in row.values if pd.notna(v)]
@@ -648,7 +644,6 @@ def _find_account_header_row(wb_path: str, sheet_name: str = _SHEET_ACCOUNT) -> 
         헤더 행 번호 (0-based). 탐지 실패 시 0 반환 (기존 동작 유지).
     """
     try:
-        # [수정] nrows=10 → _HEADER_SCAN_ROWS (우선순위 7)
         df_raw = pd.read_excel(wb_path, sheet_name=sheet_name, header=None, nrows=_HEADER_SCAN_ROWS)
         for i, row in df_raw.iterrows():
             vals = [str(v).strip() for v in row.values if pd.notna(v)]
@@ -676,7 +671,6 @@ def _find_ccm_header_row(wb_path: str, sheet_name: str = _SHEET_CCM) -> int:
     Raises:
         ValueError: 헤더 행을 찾을 수 없을 때
     """
-    # [수정] nrows=20 → _HEADER_SCAN_ROWS (우선순위 7); "Cost Center name" → COLUMN_MAP["cc_name"] (우선순위 5)
     df_raw = pd.read_excel(wb_path, sheet_name=sheet_name, header=None, nrows=_HEADER_SCAN_ROWS)
     for i, row in df_raw.iterrows():
         values = [str(v).strip() for v in row.values if pd.notna(v)]

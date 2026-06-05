@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────
-# 사업비 전표 분석 도구 — Python 의존성 목록
+# 사업비 전표 분析 도구 — Python 의존성 목록
 #
 # 설치 방법:
 #   pip install -r requirements.txt
@@ -17,8 +17,8 @@ openpyxl>=3.1.0
 # PDF 생성 (ReportLab — 순수 Python, 한국어 TTFont 지원)
 reportlab>=4.0.0
 
-# HTML 템플릿 렌더링 (templates/report_template.html 참조용)
-jinja2>=3.1.0
+# 이미지 처리 (로고 PNG 합성 — pdf_exporter.py 필수 의존성)
+Pillow>=10.0.0
 
 # 설정 파일 파싱 (column_config.yaml — 컬럼·시트명 외부화)
 pyyaml>=6.0

@@ -20,8 +20,8 @@ from pathlib import Path
 from company_theme import CompanyTheme
 
 # ── 설정 파일 경로 ─────────────────────────────────────────────────────────────
-# [중요] PyInstaller frozen 환경에서는 sys.executable(EXE 파일) 옆에 저장한다.
-#        sys._MEIPASS 는 프로그램 종료 시 삭제되는 임시 폴더이므로 사용하면 안 된다.
+# PyInstaller frozen 환경에서는 sys.executable(EXE 파일) 옆에 저장한다.
+# sys._MEIPASS 는 프로그램 종료 시 삭제되는 임시 폴더이므로 사용하면 안 된다.
 if getattr(sys, "frozen", False):
     _BASE_DIR = Path(sys.executable).parent
 else:

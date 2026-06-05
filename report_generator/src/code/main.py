@@ -1,4 +1,4 @@
-"""
+﻿"""
 main.py
 역할: 프로그램 진입점. tkinter 다이얼로그로 사용자 입력을 받고
       출력> 시트의 모든 출력전표 코드를 일괄 처리한다.
@@ -18,7 +18,6 @@ from tkinter import colorchooser, filedialog, messagebox, scrolledtext, ttk
 import data_loader
 import processor
 import pdf_exporter
-# [수정] 시트명·컬럼명 상수를 직접 임포트하여 문자열 하드코딩 제거 (우선순위 4)
 from data_loader import _SHEET_OUTPUT, COLUMN_MAP
 from company_theme import CompanyTheme
 from theme_manager import GRAY_DEFAULT, load_theme, save_theme
@@ -28,8 +27,7 @@ from config_manager import (
 )
 
 # ── 모듈 상수 ─────────────────────────────────────────────────────────────────
-# [수정] PDF 파일명 패턴 상수 분리 (우선순위 10)
-_PDF_FILENAME_TEMPLATE = "사업비_전표_분석_{}.pdf"
+_PDF_FILENAME_TEMPLATE = "사업비_전표_분析_{}.pdf"
 
 
 def _fmt_slot_label(path: str | None) -> str:
@@ -219,7 +217,11 @@ def _show_validation_dialog(
 
     inner.bind("<Configure>", _on_inner_configure)
     canvas.bind("<Configure>", _on_canvas_configure)
-    canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * e.delta / 120), "units"))
+    def _on_canvas_mousewheel(e):
+        if e.widget.winfo_class() in ('Listbox', 'TCombobox'):
+            return  # 드롭다운 스크롤은 위젯이 직접 처리하도록 전파 차단
+        canvas.yview_scroll(int(-1 * e.delta / 120), "units")
+    canvas.bind_all("<MouseWheel>", _on_canvas_mousewheel)
 
     # ── 테이블 헤더 ────────────────────────────────────────────────────────
     hdr_style = {"bg": "#4A5568", "fg": "white", "font": ("맑은 고딕", 9, "bold"), "padx": 6, "pady": 4}
@@ -418,17 +420,17 @@ def main() -> None:
     # ── Step 1-C: 선택적 컬럼 경고 (비차단) ──────────────────────────────
     col_warnings = validate_optional_cols(input_path, config)
     if col_warnings:
-        _detail_lines = []
-        for _w in col_warnings:
-            _missing_str = "\n    ".join(_w.missing_cols)
-            _detail_lines.append(f"• {_w.display_label}:\n    {_missing_str}")
-        _detail = "\n\n".join(_detail_lines)
-        _proceed = messagebox.askyesno(
+        detail_lines = []
+        for w in col_warnings:
+            missing_str = "\n    ".join(w.missing_cols)
+            detail_lines.append(f"• {w.display_label}:\n    {missing_str}")
+        detail = "\n\n".join(detail_lines)
+        proceed = messagebox.askyesno(
             "선택적 컬럼 누락 경고",
-            f"일부 컬럼을 찾을 수 없습니다:\n\n{_detail}\n\n"
+            f"일부 컬럼을 찾을 수 없습니다:\n\n{detail}\n\n"
             "해당 항목의 집계는 0으로 처리됩니다. 계속 진행하시겠습니까?",
         )
-        if not _proceed:
+        if not proceed:
             sys.exit(0)
 
     # ── Step 2: 결과 저장 폴더 선택 ───────────────────────────────────────
@@ -453,18 +455,17 @@ def main() -> None:
         sys.exit(1)
 
     # ── Step 5: 출력전표 코드 목록 추출 ───────────────────────────────────
-    # [수정] "출력>" / "출력전표" 문자열 → 상수 참조 (우선순위 4)
-    _col_output = COLUMN_MAP["출력전표"]
+    col_output = COLUMN_MAP["출력전표"]
     df_output = sheets.get(_SHEET_OUTPUT)
-    if df_output is None or df_output.empty or _col_output not in df_output.columns:
+    if df_output is None or df_output.empty or col_output not in df_output.columns:
         messagebox.showerror(
             "데이터 오류",
-            f"'{_SHEET_OUTPUT}' 시트에서 '{_col_output}' 컬럼을 찾을 수 없습니다.\n"
+            f"'{_SHEET_OUTPUT}' 시트에서 '{col_output}' 컬럼을 찾을 수 없습니다.\n"
             f"입력 파일의 '{_SHEET_OUTPUT}' 시트 구조를 확인하세요.",
         )
         sys.exit(1)
 
-    codes = df_output[_col_output].dropna().unique().tolist()
+    codes = df_output[col_output].dropna().unique().tolist()
     if not codes:
         messagebox.showerror("데이터 오류", f"'{_SHEET_OUTPUT}' 시트에 처리할 출력전표 코드가 없습니다.")
         sys.exit(1)
@@ -486,7 +487,6 @@ def main() -> None:
             errors.append((code_str, f"파이프라인 오류: {exc}"))
             continue
 
-        # PDF 저장 — [수정] 파일명 패턴 상수 참조 (우선순위 10)
         pdf_path = os.path.join(out_dir, _PDF_FILENAME_TEMPLATE.format(code_str))
         ok = pdf_exporter.export(results, pdf_path, code_str, theme=theme)
         if not ok:

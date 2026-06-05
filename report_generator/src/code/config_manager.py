@@ -20,8 +20,8 @@ from typing import Any
 import yaml
 
 # ── 설정 파일 경로 ─────────────────────────────────────────────────────────────
-# [중요] PyInstaller frozen 환경에서는 sys.executable(EXE 파일) 옆에 저장한다.
-#        sys._MEIPASS 는 프로그램 종료 시 삭제되는 임시 폴더이므로 사용하면 안 된다.
+# PyInstaller frozen 환경에서는 sys.executable(EXE 파일) 옆에 저장한다.
+# sys._MEIPASS 는 프로그램 종료 시 삭제되는 임시 폴더이므로 사용하면 안 된다.
 if getattr(sys, "frozen", False):
     _CONFIG_DIR = Path(sys.executable).parent
 else:
@@ -54,7 +54,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         # Cost Center Master 시트
         "cc_code":        "Cost Center Code",
         "cc_name":        "Cost Center name",
-        "직간접구분":      "현행: 직간접 구분",
+        "직간접구분":      "변경: 직접/공통 구분",
         # 출력 시트
         "출력전표":        "출력전표",
         "귀속_주관부서":   "귀속_주관부서",
@@ -416,7 +416,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 _YAML_HEADER = """\
 # =====================================================================
-# 전표분析서 자동화 — 컬럼·시트명 설정 파일
+# 전표분석서 자동화 — 컬럼·시트명 설정 파일
 # =====================================================================
 # ⚠️  주의: Excel 파일의 컬럼명이나 시트명이 바뀌었을 때만 수정하세요.
 #       수정 후 저장하면 다음 실행부터 새 값이 자동 적용됩니다.
@@ -455,7 +455,7 @@ columns:
   # ── Cost Center Master 시트 ────────────────────────────────────────────
   cc_code: "Cost Center Code"
   cc_name: "Cost Center name"          # ⚠️  'n'이 소문자인지 대문자인지 확인
-  직간접구분: "현행: 직간접 구분"       # ⚠️  콜론(:) 뒤 공백 포함 여부 확인
+  직간접구분: "변경: 직접/공통 구분"
 
   # ── 출력전표 시트 ──────────────────────────────────────────────────────
   출력전표: "출력전표"

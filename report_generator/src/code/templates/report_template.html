@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
@@ -193,7 +193,7 @@
 
   <!-- 3-1 -->
   <tr>
-    <td class="sec-title" colspan="7" style="padding-left:10px;">3-1. 직접비 간접비 분류 결과</td>
+    <td class="sec-title" colspan="7" style="padding-left:10px;">3-1. 직접비 공통비 분류 결과</td>
   </tr>
   <tr>
     <td class="col-hdr">구분</td>
@@ -204,8 +204,8 @@
     <td class="num" colspan="6">{{ direct_indirect.get('직접비', '') }}</td>
   </tr>
   <tr>
-    <td>간접비</td>
-    <td class="num" colspan="6">{{ direct_indirect.get('간접비', '') }}</td>
+    <td>공통비</td>
+    <td class="num" colspan="6">{{ direct_indirect.get('공통비', '') }}</td>
   </tr>
 
   <!-- 3-2 -->
@@ -214,7 +214,7 @@
   </tr>
   <tr>
     <td colspan="7" style="font-size:7.5pt; font-style:italic;">
-      : 성격 분류는 직접비 및 간접비로 구분된 금액을 대상으로 실제 사용부서의 업무 성격에 따라 분류한 결과.
+      : 성격 분류는 직접비 및 공통비로 구분된 금액을 대상으로 실제 사용부서의 업무 성격에 따라 분류한 결과.
     </td>
   </tr>
   <tr>
@@ -254,8 +254,8 @@
     <td class="sec-title" colspan="7">4. 분류 근거</td>
   </tr>
   <tr>
-    <td class="bold">직 • 간접비</td>
-    <td colspan="6">{{ classification_basis.get('직간접비_근거', '총괄문서 참조') }}</td>
+    <td class="bold">직 • 공통비</td>
+    <td colspan="6">{{ classification_basis.get('직공통비_근거', '총괄문서 참조') }}</td>
   </tr>
   <tr>
     <td class="bold">성격별 분류</td>
