@@ -27,7 +27,7 @@ from config_manager import (
 )
 
 # ── 모듈 상수 ─────────────────────────────────────────────────────────────────
-_PDF_FILENAME_TEMPLATE = "사업비_전표_분析_{}.pdf"
+_PDF_FILENAME_TEMPLATE = "사업비_전표_분석_{}.pdf"
 
 
 def _fmt_slot_label(path: str | None) -> str:
