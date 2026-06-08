@@ -450,20 +450,21 @@ def calc_direct_indirect(df_enriched: pd.DataFrame) -> dict[str, float]:
         col = ccm_col
 
     if col not in df_enriched.columns:
-        return {"직접비": 0.0, "공통비": 0.0, "총계": 총계}
+        return {"직접비": 0.0, "공통비": 0.0, "총계": 총계, "_미분류경고": None}
 
-    직접비 = float(
-        df_enriched.loc[
-            df_enriched[col].str.contains("직접", na=False), "대상금액"
-        ].sum()
-    )
-    공통비 = float(
-        df_enriched.loc[
-            df_enriched[col].str.contains("공통", na=False), "대상금액"
-        ].sum()
+    is_직접     = df_enriched[col].str.contains("직접", na=False)
+    is_공통_only = df_enriched[col].str.contains("공통", na=False) & ~is_직접
+
+    직접비 = float(df_enriched.loc[is_직접,      "대상금액"].sum())
+    공통비 = float(df_enriched.loc[is_공통_only, "대상금액"].sum())
+
+    미분류 = round(총계 - 직접비 - 공통비, 10)
+    _경고 = (
+        {"미분류금액": 미분류, "총계": 총계, "직접비": 직접비, "공통비": 공통비}
+        if abs(미분류) > 0.01 else None
     )
 
-    return {"직접비": 직접비, "공통비": 공통비, "총계": 총계}
+    return {"직접비": 직접비, "공통비": 공통비, "총계": 총계, "_미분류경고": _경고}
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -674,11 +675,15 @@ def run_pipeline(
         ].reset_index(drop=True)
     df_주관, df_사용 = calc_dept_attribution(df_enriched, df_output_for_keyword, df_output)
 
+    di_result   = calc_direct_indirect(df_enriched)                      # Step 4
+    _미분류경고 = di_result.pop("_미분류경고", None)
+
     return {
         "account_info":         extract_account_info(df_enriched),       # Step 6
         "dept_주관":            df_주관,                                  # Step 3
         "dept_사용":            df_사용,                                  # Step 3
-        "direct_indirect":      calc_direct_indirect(df_enriched),       # Step 4
+        "direct_indirect":      di_result,                               # Step 4
         "nature":               calc_nature_classification(df_enriched, df_output_for_keyword), # Step 5
         "classification_basis": CLASSIFICATION_BASIS,                    # 분류 근거 상수
+        "_미분류경고":          _미분류경고,
     }

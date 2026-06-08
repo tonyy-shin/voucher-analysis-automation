@@ -178,10 +178,11 @@ def load_config() -> dict[str, Any]:
         return copy.deepcopy(_DEFAULT_CONFIG)
 
 
-def save_config(config: dict[str, Any]) -> None:
+def save_config(config: dict[str, Any]) -> bool:
     """설정을 column_config.yaml에 한국어 주석 헤더와 함께 저장한다.
 
-    OS 오류(쓰기 권한 부족 등)는 조용히 무시한다.
+    Returns:
+        True: 저장 성공, False: OS 오류로 저장 실패 (쓰기 권한 부족 등)
     """
     try:
         body = yaml.dump(
@@ -192,8 +193,9 @@ def save_config(config: dict[str, Any]) -> None:
             sort_keys=False,
         )
         _CONFIG_PATH.write_text(_YAML_HEADER + body, encoding="utf-8")
+        return True
     except OSError:
-        pass
+        return False
 
 
 def generate_default_config_file() -> None:
@@ -357,8 +359,6 @@ def _get_sheet_columns(wb, sheet_name: str, max_rows: int = 25) -> list[str]:
     best_count = 0
 
     for i, row in enumerate(ws.iter_rows(max_row=max_rows, values_only=True)):
-        if i >= max_rows:
-            break
         str_vals = [
             str(v).strip()
             for v in row

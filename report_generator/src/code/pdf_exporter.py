@@ -159,7 +159,7 @@ def export(results: dict, pdf_path: str, code: str,
             "PDF 생성 실패",
             f"PDF 생성 중 오류가 발생했습니다.\n\n"
             f"파일: {os.path.basename(pdf_path)}\n사유: {exc}\n\n"
-            "CSV 파일은 정상 저장되었습니다.",
+            "다른 출력 파일에는 영향이 없습니다.",
         )
         return False
 
@@ -296,13 +296,27 @@ def _tbl_header(s: dict) -> Table:
 
     # Fallback: 사용자 로고가 하나도 없을 때만 기본 로고 목록 사용
     if not logo_imgs:
-        for name, h in s['logos']:
-            p = _BASE_DIR / 'images' / name
-            if p.exists():
-                try:
-                    logo_imgs.append(_load_image_safe(str(p), max_height=h))
-                except Exception:
-                    pass
+        # Phase B와 동일한 슬롯 너비 로직을 fallback에도 적용하여 셀 초과 클리핑 방지
+        fb_candidates = [
+            (str(_BASE_DIR / 'images' / name), h)
+            for name, h in s['logos']
+            if (_BASE_DIR / 'images' / name).exists()
+        ]
+        n_fb = len(fb_candidates)
+        if n_fb >= 3:
+            fb_widths = [_LOGO_CELL_W / 3] * n_fb
+        elif n_fb == 2:
+            fb_widths = list(_COLS_HEADER_LOGO)
+        elif n_fb == 1:
+            fb_widths = [_LOGO_CELL_W]
+        else:
+            fb_widths = []
+
+        for (path, h), cell_w in zip(fb_candidates, fb_widths):
+            try:
+                logo_imgs.append(_load_image_safe(path, max_height=h, max_width=cell_w))
+            except Exception:
+                pass
 
     # ── 로고 개수에 따른 동적 서브테이블 구성 ─────────────────────────────
     _logo_tbl_style = TableStyle([
@@ -481,9 +495,6 @@ def _tbl_nature_32(nat: pd.DataFrame, s: dict, fb: str) -> list:
         for col in NATURE_COLS:
             nat_numeric[col] = pd.to_numeric(nat_numeric[col], errors='coerce').fillna(0)
         for _, r in nat_numeric.iloc[:-1].iterrows():
-            # 모든 성격 컬럼이 전부 0인 완전 빈 행만 스킵 (상계된 행은 유지)
-            if all(r[col] == 0 for col in NATURE_COLS):
-                continue
             data.append(
                 [_P(str(r.get(COLUMN_MAP['귀속_사용부서'], '')), s['body'])]
                 + [_P(_fmt(r.get(c, 0)), s['right']) for c in _display_cols]

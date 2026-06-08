@@ -333,7 +333,12 @@ def _show_validation_dialog(
 
     def _save_and_continue():
         updated = _build_config()
-        save_config(updated)
+        if not save_config(updated):
+            messagebox.showwarning(
+                "설정 저장 실패",
+                "설정 파일 저장에 실패했습니다 (쓰기 권한 부족 또는 디스크 오류).\n\n"
+                "이번 실행에는 수정된 설정이 적용되지만 다음 실행부터는 반영되지 않습니다.",
+            )
         result[0] = updated
         dlg.destroy()
 
@@ -428,7 +433,8 @@ def main() -> None:
         proceed = messagebox.askyesno(
             "선택적 컬럼 누락 경고",
             f"일부 컬럼을 찾을 수 없습니다:\n\n{detail}\n\n"
-            "해당 항목의 집계는 0으로 처리됩니다. 계속 진행하시겠습니까?",
+            "해당 컬럼이 완전히 누락된 경우 해당 출력전표 처리가 실패할 수 있습니다.\n"
+            "계속 진행하시겠습니까?",
         )
         if not proceed:
             sys.exit(0)
@@ -473,6 +479,7 @@ def main() -> None:
     # ── Step 6: 코드별 파이프라인 루프 ────────────────────────────────────
     successes: list[str] = []
     errors: list[tuple[str, str]] = []
+    분류경고들: list[str] = []
 
     for code in codes:
         code_str = str(code).strip()
@@ -487,6 +494,13 @@ def main() -> None:
             errors.append((code_str, f"파이프라인 오류: {exc}"))
             continue
 
+        _w = results.pop("_미분류경고", None)
+        if _w:
+            분류경고들.append(
+                f"• [{code_str}]  미분류 금액: {_w['미분류금액']:,.0f}원\n"
+                f"  총계 {_w['총계']:,.0f} ≠ 직접비 {_w['직접비']:,.0f} + 공통비 {_w['공통비']:,.0f}"
+            )
+
         pdf_path = os.path.join(out_dir, _PDF_FILENAME_TEMPLATE.format(code_str))
         ok = pdf_exporter.export(results, pdf_path, code_str, theme=theme)
         if not ok:
@@ -494,6 +508,15 @@ def main() -> None:
             continue
 
         successes.append(code_str)
+
+    if 분류경고들:
+        messagebox.showwarning(
+            "직간접 분류 불일치 경고",
+            "아래 출력전표에서 직간접 분류 합계가 총계와 일치하지 않습니다.\n\n"
+            "원인: '직/간접비' 또는 '변경: 직접/공통 구분' 컬럼에 분류되지 않은 행 존재\n"
+            "조치: 원본 데이터의 직간접 구분 값을 '직접' 또는 '공통'으로 수정해 주세요.\n\n"
+            + "\n\n".join(분류경고들),
+        )
 
     # ── Step 7: 완료 요약 메시지 ──────────────────────────────────────────
     summary_lines = [
