@@ -480,6 +480,7 @@ def main() -> None:
     successes: list[str] = []
     errors: list[tuple[str, str]] = []
     분류경고들: list[str] = []
+    부점누락경고들: list[str] = []
 
     for code in codes:
         code_str = str(code).strip()
@@ -501,6 +502,18 @@ def main() -> None:
                 f"  총계 {_w['총계']:,.0f} ≠ 직접비 {_w['직접비']:,.0f} + 공통비 {_w['공통비']:,.0f}"
             )
 
+        _p = results.pop("_부점누락경고", None)
+        if _p:
+            lines = [
+                f"  - {item['부서명']}: {item['금액']:,.0f}원"
+                for item in _p["누락_부서목록"]
+            ]
+            부점누락경고들.append(
+                f"• [{code_str}] 누락 부서 {len(_p['누락_부서목록'])}개"
+                f" / 누락 금액 합계: {_p['누락_총합']:,.0f}원\n"
+                + "\n".join(lines)
+            )
+
         pdf_path = os.path.join(out_dir, _PDF_FILENAME_TEMPLATE.format(code_str))
         ok = pdf_exporter.export(results, pdf_path, code_str, theme=theme)
         if not ok:
@@ -508,6 +521,16 @@ def main() -> None:
             continue
 
         successes.append(code_str)
+
+    if 부점누락경고들:
+        messagebox.showwarning(
+            "부점 누락 경고 — 정합성 불일치",
+            "아래 출력전표에서 '실제발생사업비' 원본 데이터에는 존재하지만\n"
+            "'출력>' 시트의 주관/실제부서 목록에 없어 부점귀속 현황에서\n"
+            "누락된 부서가 발견되었습니다.\n\n"
+            "【조치】 '출력>' 시트에 해당 부서를 추가한 뒤 재실행하세요.\n\n"
+            + "\n\n".join(부점누락경고들),
+        )
 
     if 분류경고들:
         messagebox.showwarning(
