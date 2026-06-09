@@ -124,6 +124,81 @@ NATURE_COLS: list[str] = [
 #  Public API
 # ════════════════════════════════════════════════════════════════════════════
 
+
+def check_unregistered_teams(wb_path: str, config: dict | None = None) -> list[str]:
+    """
+    실제발생사업비의 팀 목록(Set A)과 출력> 시트 등록 부서(Set B)를 비교하여
+    Set A - Set B (미등록 팀)를 반환한다.
+
+    JOIN 없이 두 시트의 최소 컬럼만 읽어 초기 단계에서 경량으로 실행된다.
+    load_all_sheets() 이전에 호출되어 PDF 생성 전 데이터 정합성을 사전 검증한다.
+
+    Args:
+        wb_path: Excel 파일 경로
+        config:  column_config.yaml 설정 (None이면 기본값 사용)
+
+    Returns:
+        미등록 팀 이름 목록 (정렬됨). 없으면 [].
+    """
+    sheet_transaction = _SHEET_TRANSACTION
+    sheet_output      = _SHEET_OUTPUT
+    col_team          = COL_TEAM
+    label_코드        = "출력전표"
+    label_주관        = "주관부서"
+    label_사용        = "사용부서"
+
+    if config:
+        cfg_sheets        = config.get("sheets", {})
+        sheet_transaction = cfg_sheets.get("transaction", sheet_transaction)
+        sheet_output      = cfg_sheets.get("output",      sheet_output)
+        col_team          = config.get("col_team", col_team)
+        out_labels        = config.get("output_labels", {})
+        label_코드 = out_labels.get("코드", label_코드)
+        label_주관 = out_labels.get("주관", label_주관)
+        label_사용 = out_labels.get("사용", label_사용)
+
+    # ── Set A: 실제발생사업비 팀 컬럼만 경량 로드 ────────────────────────────
+    try:
+        header_row = _find_actual_header_row(wb_path, sheet_transaction)
+        df_teams = pd.read_excel(
+            wb_path,
+            sheet_name=sheet_transaction,
+            header=header_row,
+            usecols=[col_team],
+        )
+        set_a: set[str] = {
+            str(v).strip()
+            for v in df_teams[col_team].dropna().unique()
+            if str(v).strip() not in ("", "nan", FALLBACK_TEXT)
+        }
+    except Exception:
+        return []
+
+    if not set_a:
+        return []
+
+    # ── Set B: 출력> 시트 등록 부서 합집합 ───────────────────────────────────
+    try:
+        with pd.ExcelFile(wb_path) as xl:
+            if sheet_output not in xl.sheet_names:
+                return []
+            df_raw = pd.read_excel(xl, sheet_name=sheet_output, header=None)
+    except Exception:
+        return []
+
+    df_out = _preprocess_output(df_raw, label_코드, label_주관, label_사용)
+    if df_out.empty:
+        return []
+
+    set_b: set[str] = set()
+    for col in [COLUMN_MAP["귀속_주관부서"], COLUMN_MAP["귀속_사용부서"]]:
+        if col in df_out.columns:
+            vals = df_out[col].dropna().astype(str).str.strip()
+            set_b.update(vals[~vals.isin({"", "nan", FALLBACK_TEXT})].tolist())
+
+    # ── 차집합 반환 ──────────────────────────────────────────────────────────
+    return sorted(set_a - set_b)
+
 def load_all_sheets(wb_path: str, config: dict | None = None) -> dict[str, pd.DataFrame]:
     """
     4개 시트를 로드하고 Phase 0 클렌징까지 완료한 DataFrame dict를 반환한다.
@@ -507,7 +582,7 @@ def _preprocess_output(
     df_data = df_raw.iloc[r_code + 1:].reset_index(drop=True)
 
     # ── 3. 블록 헤더 행 감지 & 전체 출력전표 코드 수집 ────────────────────────
-    # 블록 헤더: c_code에 유효 코드가 있고 c_주관이 레이블 또는 NA인 행
+    # 블록 헤더: c_code에 유효 코드가 있는 모든 행 (c_주관 값 무관)
     # _parse_output_code()로 숫자형(5001) · 영문혼합(A001) 코드 모두 허용
     _DEPT_LABELS = {"", label_주관, label_사용}
     _extra_reserved: frozenset[str] = frozenset({label_코드})
@@ -520,9 +595,7 @@ def _preprocess_output(
             continue
         if code_str not in all_output_codes:
             all_output_codes.append(code_str)
-        주관_val = df_data.iloc[row_i, c_주관]
-        if pd.isna(주관_val) or str(주관_val).strip() in _DEPT_LABELS:
-            header_indices.append(row_i)
+        header_indices.append(row_i)
 
     if not header_indices:
         return _EMPTY
@@ -532,6 +605,16 @@ def _preprocess_output(
     for idx, h in enumerate(header_indices):
         전표_raw = _parse_output_code(df_data.iloc[h, c_code], _extra_reserved) or ""
         next_h = header_indices[idx + 1] if idx + 1 < len(header_indices) else len(df_data)
+
+        # 블록 헤더 행(h) 자체에 부서 데이터가 있는 경우 (코드+부서 동일 행 형식) 첫 레코드 등록
+        주관_h = df_data.iloc[h, c_주관]
+        if not pd.isna(주관_h) and str(주관_h).strip() not in _DEPT_LABELS:
+            사용_h = df_data.iloc[h, c_사용] if c_사용 is not None else pd.NA
+            records.append({
+                col_전표:     전표_raw,
+                col_주관_out: 주관_h,
+                col_사용_out: 사용_h,
+            })
 
         before_count = len(records)
         for d in range(h + 1, next_h):

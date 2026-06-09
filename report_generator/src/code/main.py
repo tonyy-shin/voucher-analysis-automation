@@ -1,4 +1,4 @@
-﻿"""
+"""
 main.py
 역할: 프로그램 진입점. tkinter 다이얼로그로 사용자 입력을 받고
       출력> 시트의 모든 출력전표 코드를 일괄 처리한다.
@@ -439,13 +439,92 @@ def main() -> None:
         if not proceed:
             sys.exit(0)
 
-    # ── Step 2: 결과 저장 폴더 선택 ───────────────────────────────────────
-    out_dir = filedialog.askdirectory(
-        title="결과 파일 저장 폴더 선택",
-    )
-    if not out_dir:
-        messagebox.showinfo("취소", "저장 폴더 선택이 취소되었습니다. 프로그램을 종료합니다.")
-        sys.exit(0)
+    # -- Step 1-D: 미등록 부서 사전 검증 (차단 또는 무시) --------------------
+    _unregistered = data_loader.check_unregistered_teams(input_path, config)
+    if _unregistered:
+        _dept_lines = "\n".join(f"  {chr(8226)} {t}" for t in _unregistered)
+
+        _proceed = False
+
+        def _build_unregistered_dialog(parent: tk.Tk) -> None:
+            nonlocal _proceed
+            dlg = tk.Toplevel(parent)
+            dlg.title("미등록 부서 감지")
+            dlg.resizable(False, False)
+            dlg.grab_set()
+
+            # 상단 안내 문구
+            _msg = (
+                "실제 발생 내역에 존재하지만 '출력>' 시트에 등록되지 않은 부서가 발견되었습니다.\n"
+                "이대로 진행하면 해당 부서의 실적은 집계에서 누락됩니다."
+            )
+            tk.Label(
+                dlg,
+                text=_msg,
+                wraplength=440,
+                justify="left",
+                fg="#c0392b",
+                font=("Malgun Gothic", 10, "bold"),
+                padx=16, pady=14,
+            ).pack(fill="x")
+
+            # 스크롤 가능한 부서 목록
+            frame_list = tk.Frame(dlg, padx=16, pady=4)
+            frame_list.pack(fill="both", expand=True)
+
+            scrollbar = tk.Scrollbar(frame_list, orient="vertical")
+            txt = tk.Text(
+                frame_list,
+                height=10,
+                width=50,
+                yscrollcommand=scrollbar.set,
+                font=("Malgun Gothic", 10),
+                relief="sunken",
+                bd=1,
+            )
+            scrollbar.config(command=txt.yview)
+            scrollbar.pack(side="right", fill="y")
+            txt.pack(side="left", fill="both", expand=True)
+            txt.insert("1.0", _dept_lines)
+            txt.config(state="disabled")
+
+            # 하단 버튼
+            frame_btn = tk.Frame(dlg, padx=16, pady=12)
+            frame_btn.pack(fill="x")
+
+            def _on_exit() -> None:
+                dlg.destroy()
+                root.destroy()
+                sys.exit(0)
+
+            def _on_proceed() -> None:
+                nonlocal _proceed
+                _proceed = True
+                dlg.destroy()
+
+            dlg.protocol("WM_DELETE_WINDOW", _on_exit)
+
+            tk.Button(
+                frame_btn, text="종료 후 수정",
+                width=18, command=_on_exit,
+            ).pack(side="left", padx=(0, 8))
+            tk.Button(
+                frame_btn, text="무시하고 진행",
+                width=18, command=_on_proceed,
+            ).pack(side="left")
+
+            dlg.update_idletasks()
+            _w = dlg.winfo_reqwidth()
+            _h = dlg.winfo_reqheight()
+            _sw = dlg.winfo_screenwidth()
+            _sh = dlg.winfo_screenheight()
+            dlg.geometry(f"{_w}x{_h}+{(_sw - _w) // 2}+{(_sh - _h) // 2}")
+
+            parent.wait_window(dlg)
+
+        _build_unregistered_dialog(root)
+        if not _proceed:
+            sys.exit(0)
 
     # ── Step 3: 데이터 로드 (Phase 0 클렌징 포함) ─────────────────────────
     try:
@@ -479,13 +558,13 @@ def main() -> None:
     # ── Step 6: 코드별 파이프라인 루프 ────────────────────────────────────
     successes: list[str] = []
     errors: list[tuple[str, str]] = []
-    분류경고들: list[str] = []
-    부점누락경고들: list[str] = []
+    _pipeline_results: dict[str, dict] = {}
+    _unclassified: dict[str, dict] = {}
 
+    # ── Stage 1: 파이프라인 전체 실행 및 결과 수집 ────────────────────────
     for code in codes:
         code_str = str(code).strip()
 
-        # 파이프라인 실행
         try:
             results = processor.run_pipeline(sheets, code_str)
         except ValueError as exc:
@@ -497,23 +576,120 @@ def main() -> None:
 
         _w = results.pop("_미분류경고", None)
         if _w:
-            분류경고들.append(
-                f"• [{code_str}]  미분류 금액: {_w['미분류금액']:,.0f}원\n"
-                f"  총계 {_w['총계']:,.0f} ≠ 직접비 {_w['직접비']:,.0f} + 공통비 {_w['공통비']:,.0f}"
-            )
+            _unclassified[code_str] = {
+                "warning": _w,
+                "계정명": results["account_info"].get("계정명", ""),
+            }
+        _pipeline_results[code_str] = results
 
-        _p = results.pop("_부점누락경고", None)
-        if _p:
-            lines = [
-                f"  - {item['부서명']}: {item['금액']:,.0f}원"
-                for item in _p["누락_부서목록"]
-            ]
-            부점누락경고들.append(
-                f"• [{code_str}] 누락 부서 {len(_p['누락_부서목록'])}개"
-                f" / 누락 금액 합계: {_p['누락_총합']:,.0f}원\n"
-                + "\n".join(lines)
-            )
+    # ── Stage 2: 미분류건 사전 경고 (있을 때만) ───────────────────────────
+    if _unclassified:
+        _proceed = False
 
+        def _build_unclassified_dialog(parent: tk.Tk) -> None:
+            nonlocal _proceed
+            dlg = tk.Toplevel(parent)
+            dlg.title("미분류건 감지")
+            dlg.resizable(False, False)
+            dlg.grab_set()
+
+            _msg = (
+                "직접비·공통비로 분류되지 않은 행이 발견되었습니다.\n"
+                "이대로 진행하면 해당 금액이 직간접 분류 합계에서 누락됩니다.\n"
+                "PDF 생성 전에 원본 데이터의 직간접 구분 값을 수정해 주세요."
+            )
+            tk.Label(
+                dlg,
+                text=_msg,
+                wraplength=460,
+                justify="left",
+                fg="#c0392b",
+                font=("Malgun Gothic", 10, "bold"),
+                padx=16, pady=14,
+            ).pack(fill="x")
+
+            frame_list = tk.Frame(dlg, padx=16, pady=4)
+            frame_list.pack(fill="both", expand=True)
+
+            scrollbar = tk.Scrollbar(frame_list, orient="vertical")
+            txt = tk.Text(
+                frame_list,
+                height=12,
+                width=60,
+                yscrollcommand=scrollbar.set,
+                font=("Malgun Gothic", 10),
+                relief="sunken",
+                bd=1,
+            )
+            scrollbar.config(command=txt.yview)
+            scrollbar.pack(side="right", fill="y")
+            txt.pack(side="left", fill="both", expand=True)
+
+            lines = []
+            for _code, info in _unclassified.items():
+                w = info["warning"]
+                lines.append(
+                    f"• [{_code}] {info['계정명']}   미분류 금액: {w['미분류금액']:,.0f}원"
+                )
+                for row in w.get("미분류행", []):
+                    분류값 = row.get("분류값", "")
+                    분류값_str = str(분류값).strip() if 분류값 else "(빈칸)"
+                    lines.append(
+                        f"    - 원가요소: {row.get('원가요소', '')} / "
+                        f"분류값: \"{분류값_str}\" / "
+                        f"금액: {row.get('금액', 0):,.0f}원"
+                    )
+                lines.append("")
+            txt.insert("1.0", "\n".join(lines))
+            txt.config(state="disabled")
+
+            frame_btn = tk.Frame(dlg, padx=16, pady=12)
+            frame_btn.pack(fill="x")
+
+            def _on_exit() -> None:
+                dlg.destroy()
+                root.destroy()
+                sys.exit(0)
+
+            def _on_proceed() -> None:
+                nonlocal _proceed
+                _proceed = True
+                dlg.destroy()
+
+            dlg.protocol("WM_DELETE_WINDOW", _on_exit)
+
+            tk.Button(
+                frame_btn, text="종료 후 수정",
+                width=18, command=_on_exit,
+            ).pack(side="left", padx=(0, 8))
+            tk.Button(
+                frame_btn, text="무시하고 진행",
+                width=18, command=_on_proceed,
+            ).pack(side="left")
+
+            dlg.update_idletasks()
+            _w_px = dlg.winfo_reqwidth()
+            _h_px = dlg.winfo_reqheight()
+            _sw = dlg.winfo_screenwidth()
+            _sh = dlg.winfo_screenheight()
+            dlg.geometry(f"{_w_px}x{_h_px}+{(_sw - _w_px) // 2}+{(_sh - _h_px) // 2}")
+
+            parent.wait_window(dlg)
+
+        _build_unclassified_dialog(root)
+        if not _proceed:
+            sys.exit(0)
+
+    # ── Step 2: 결과 저장 폴더 선택 ───────────────────────────────────────
+    out_dir = filedialog.askdirectory(
+        title="결과 파일 저장 폴더 선택",
+    )
+    if not out_dir:
+        messagebox.showinfo("취소", "저장 폴더 선택이 취소되었습니다. 프로그램을 종료합니다.")
+        sys.exit(0)
+
+    # ── Stage 3: PDF 생성 ─────────────────────────────────────────────────
+    for code_str, results in _pipeline_results.items():
         pdf_path = os.path.join(out_dir, _PDF_FILENAME_TEMPLATE.format(code_str))
         ok = pdf_exporter.export(results, pdf_path, code_str, theme=theme)
         if not ok:
@@ -521,25 +697,6 @@ def main() -> None:
             continue
 
         successes.append(code_str)
-
-    if 부점누락경고들:
-        messagebox.showwarning(
-            "부점 누락 경고 — 정합성 불일치",
-            "아래 출력전표에서 '실제발생사업비' 원본 데이터에는 존재하지만\n"
-            "'출력>' 시트의 주관/실제부서 목록에 없어 부점귀속 현황에서\n"
-            "누락된 부서가 발견되었습니다.\n\n"
-            "【조치】 '출력>' 시트에 해당 부서를 추가한 뒤 재실행하세요.\n\n"
-            + "\n\n".join(부점누락경고들),
-        )
-
-    if 분류경고들:
-        messagebox.showwarning(
-            "직간접 분류 불일치 경고",
-            "아래 출력전표에서 직간접 분류 합계가 총계와 일치하지 않습니다.\n\n"
-            "원인: '직/간접비' 또는 '변경: 직접/공통 구분' 컬럼에 분류되지 않은 행 존재\n"
-            "조치: 원본 데이터의 직간접 구분 값을 '직접' 또는 '공통'으로 수정해 주세요.\n\n"
-            + "\n\n".join(분류경고들),
-        )
 
     # ── Step 7: 완료 요약 메시지 ──────────────────────────────────────────
     summary_lines = [

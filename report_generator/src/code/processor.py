@@ -248,7 +248,7 @@ def calc_dept_attribution(
     df_enriched: pd.DataFrame,
     df_output: pd.DataFrame = None,
     df_output_all: pd.DataFrame = None,
-) -> tuple[pd.DataFrame, pd.DataFrame, dict | None]:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     주관부서별·사용부서별 대상금액 합계 및 구성비(%)를 계산한다.
 
@@ -304,13 +304,14 @@ def calc_dept_attribution(
             amount = float(
                 df_enriched.loc[df_enriched[COL_TEAM] == dept_str, _amt_col].sum()
             )
+            if not (df_enriched[COL_TEAM] == dept_str).any():
+                continue
             rows.append({"부서명": dept_str, "대상금액": amount})
 
         if not rows:
             return None
 
         result = pd.DataFrame(rows)
-        result = result[result["대상금액"] > 0].copy()
         total = result["대상금액"].sum()
         result["구성비(%)"] = (
             result["대상금액"].div(total).mul(100).round(2) if total != 0 else 0.0
@@ -390,7 +391,6 @@ def calc_dept_attribution(
             if not rows:
                 return empty.copy()
             df_r = pd.DataFrame(rows)
-            df_r = df_r[df_r["대상금액"] > 0].copy()
             total = df_r["대상금액"].sum()
             df_r["구성비(%)"] = (
                 df_r["대상금액"].div(total).mul(100).round(2) if total != 0 else 0.0
@@ -399,62 +399,10 @@ def calc_dept_attribution(
 
         return _finalize(주관_rows), _finalize(사용_rows)
 
-    def _detect_missing(ref_df: pd.DataFrame) -> dict | None:
-        """출력> 시트 등록 부서와 df_enriched 실제 팀을 비교해 누락 부서·금액을 반환한다.
-
-        Args:
-            ref_df: 비sentinel → df_output(키워드 전용), sentinel → df_output_all(전체)
-
-        Returns:
-            누락 부서가 있으면 {"누락_부서목록": [...], "누락_총합": float},
-            없으면 None.
-        """
-        if ref_df is None or ref_df.empty or COL_TEAM not in df_enriched.columns:
-            return None
-
-        # 출력> 시트 주관+사용부서 합집합
-        output_teams: set[str] = set()
-        for col in [COLUMN_MAP["귀속_주관부서"], COLUMN_MAP["귀속_사용부서"]]:
-            if col in ref_df.columns:
-                vals = ref_df[col].dropna().astype(str).str.strip()
-                output_teams.update(
-                    vals[~vals.isin({"", FALLBACK_TEXT})].tolist()
-                )
-
-        # df_enriched 실제 팀 집합
-        actual_teams: set[str] = {
-            str(t).strip()
-            for t in df_enriched[COL_TEAM].dropna().unique()
-            if str(t).strip() not in ("", FALLBACK_TEXT)
-        }
-
-        missing = actual_teams - output_teams
-        if not missing:
-            return None
-
-        _amt_col = COL_SUBTOTAL if COL_SUBTOTAL in df_enriched.columns else "대상금액"
-        missing_list: list[dict] = []
-        missing_total = 0.0
-        for team in sorted(missing):
-            amt = float(
-                df_enriched.loc[df_enriched[COL_TEAM] == team, _amt_col].sum()
-            )
-            if abs(amt) > 0.01:  # 부동소수점 오차 수준의 미미한 금액 제외
-                missing_list.append({"부서명": team, "금액": amt})
-                missing_total += amt
-
-        if not missing_list:
-            return None
-
-        # 금액 내림차순 정렬
-        missing_list.sort(key=lambda x: x["금액"], reverse=True)
-        return {"누락_부서목록": missing_list, "누락_총합": missing_total}
-
     # ── sentinel 케이스: 전역 F열/G열 lookup으로 주관/사용 분류 ─────────────
     if _is_sentinel():
         df_주관, df_사용 = _build_from_global_lookup()
-        누락_경고 = _detect_missing(df_output_all)
-        return df_주관, df_사용, 누락_경고
+        return df_주관, df_사용
 
     # ── 비sentinel 케이스: 기존 팀 매칭 → groupby 폴백 ──────────────────────
     df_주관 = _build_from_team_match(COLUMN_MAP["귀속_주관부서"])
@@ -465,8 +413,7 @@ def calc_dept_attribution(
     if df_사용 is None:
         df_사용 = _build_from_groupby(COLUMN_MAP["귀속_사용부서"])
 
-    누락_경고 = _detect_missing(df_output)
-    return df_주관, df_사용, 누락_경고
+    return df_주관, df_사용
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -513,10 +460,23 @@ def calc_direct_indirect(df_enriched: pd.DataFrame) -> dict[str, float]:
     공통비 = float(df_enriched.loc[is_공통_only, "대상금액"].sum())
 
     미분류 = round(총계 - 직접비 - 공통비, 10)
-    _경고 = (
-        {"미분류금액": 미분류, "총계": 총계, "직접비": 직접비, "공통비": 공통비}
-        if abs(미분류) > 0.01 else None
-    )
+    if abs(미분류) > 0.01:
+        is_미분류 = ~is_직접 & ~is_공통_only
+        _원가_col = COLUMN_MAP["원가요소"]
+        미분류행 = (
+            df_enriched.loc[
+                is_미분류,
+                [c for c in [_원가_col, col, "대상금액"] if c in df_enriched.columns],
+            ]
+            .rename(columns={_원가_col: "원가요소", col: "분류값", "대상금액": "금액"})
+            .to_dict("records")
+        )
+        _경고: dict | None = {
+            "미분류금액": 미분류, "총계": 총계, "직접비": 직접비, "공통비": 공통비,
+            "미분류행": 미분류행,
+        }
+    else:
+        _경고 = None
 
     return {"직접비": 직접비, "공통비": 공통비, "총계": 총계, "_미분류경고": _경고}
 
@@ -580,19 +540,9 @@ def calc_nature_classification(
                     vals[~vals.isin({"", FALLBACK_TEXT})].tolist()
                 )
 
-        # 3. 실제발생사업비 미입력 부서 → 0원 행 추가
-        existing_depts = set(grouped[dept_col].astype(str).str.strip().tolist())
-        zero_rows = []
-        for dept in all_output_depts:
-            if dept not in existing_depts:
-                row: dict = {dept_col: dept}
-                for c in existing_nature:
-                    row[c] = 0.0
-                zero_rows.append(row)
-        if zero_rows:
-            grouped = pd.concat(
-                [grouped, pd.DataFrame(zero_rows)], ignore_index=True
-            )
+        # 등록되지 않은 팀 제거 — all_output_depts 비어 있으면(sentinel) 건너뜀
+        if all_output_depts:
+            grouped = grouped[grouped[dept_col].isin(all_output_depts)].reset_index(drop=True)
     else:
         # 폴백: 귀속_사용부서 기준 집계 (df_output 없거나 팀 컬럼 없을 때)
         if dept_col not in df_enriched.columns:
@@ -727,7 +677,7 @@ def run_pipeline(
         df_output_for_keyword = df_output[
             df_output[_out_right] == keyword_clean
         ].reset_index(drop=True)
-    df_주관, df_사용, _부점누락경고 = calc_dept_attribution(
+    df_주관, df_사용 = calc_dept_attribution(
         df_enriched, df_output_for_keyword, df_output
     )
 
@@ -735,20 +685,6 @@ def run_pipeline(
     _미분류경고 = di_result.pop("_미분류경고", None)
 
     # ── 정합성 검증: 부점귀속 주관 총계 + 누락 총합 ≈ 직접비+공통비 총계 ──────
-    # 각 팀이 주관/사용부서 중 하나에만 등록된다는 가정하의 방어적 검증.
-    # 실행을 차단하지 않고 warnings.warn()으로 기록한다.
-    import warnings as _warnings
-    _dept_sum = float(df_주관["대상금액"].sum()) if not df_주관.empty else 0.0
-    _di_total = di_result["총계"]
-    _miss_sum = (_부점누락경고["누락_총합"] if _부점누락경고 else 0.0)
-    _gap = abs((_dept_sum + _miss_sum) - _di_total)
-    if _gap > 1.0:
-        _warnings.warn(
-            f"[{keyword}] 총계 불일치 (gap={_gap:,.0f}원): "
-            f"부점귀속({_dept_sum:,.0f}) + 누락({_miss_sum:,.0f})"
-            f" ≠ 직접비+공통비({_di_total:,.0f})"
-        )
-
     return {
         "account_info":         extract_account_info(df_enriched),       # Step 6
         "dept_주관":            df_주관,                                  # Step 3
@@ -757,5 +693,4 @@ def run_pipeline(
         "nature":               calc_nature_classification(df_enriched, df_output_for_keyword), # Step 5
         "classification_basis": CLASSIFICATION_BASIS,                    # 분류 근거 상수
         "_미분류경고":          _미분류경고,
-        "_부점누락경고":        _부점누락경고,
     }
