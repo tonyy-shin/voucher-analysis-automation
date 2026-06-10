@@ -466,10 +466,11 @@ def _preprocess_ccm(df: pd.DataFrame) -> pd.DataFrame:
     available = [c for c in _get_ccm_cols_needed() if c in df.columns]
     df = df[available].copy()
 
-    # 키가 없는 행은 JOIN에 기여 불가 → 제거
+    # 키가 없는 행 및 중복 키 행 제거 (JOIN fan-out 방지)
     _cc = COLUMN_MAP["cc_code"]
     df = df.dropna(subset=[_cc])
     df = df[df[_cc] != ""]
+    df = df.drop_duplicates(subset=[_cc])
 
     return df
 
@@ -493,7 +494,14 @@ def _preprocess_account(df: pd.DataFrame) -> pd.DataFrame:
     df = cleanse_whitespace(df)
 
     available = [c for c in _get_account_cols_needed() if c in df.columns]
-    return df[available].copy()
+    df = df[available].copy()
+
+    # 중복 키 행 제거 (JOIN fan-out 방지)
+    _acct = COLUMN_MAP["계정번호"]
+    if _acct in df.columns:
+        df = df.drop_duplicates(subset=[_acct])
+
+    return df
 
 
 _CODE_RESERVED: frozenset[str] = frozenset({"", "nan", "None", "NaN"})
@@ -530,135 +538,78 @@ def _preprocess_output(
     label_사용: str = "사용부서",
 ) -> pd.DataFrame:
     """
-    출력> 시트 전처리 — header=None으로 로드된 원본 DataFrame 처리.
+    출력> 시트 전처리 — 출력전표·주관부서·사용부서 열을 독립적으로 수집한다.
 
-    시트 구조:
-        - 전역 헤더 행: label_코드 레이블(B열), label_주관/label_사용 레이블(F/G열)
-        - 각 출력전표 블록의 첫 행: col=c_code에 코드값이 있는 행
-          (_parse_output_code()로 숫자형·영문혼합 코드 모두 허용)
-        - 부서 데이터 행: 블록 헤더 행 다음부터 다음 블록 헤더 전까지
-
-    적용 순서:
-        1. 전역 레이블(label_코드/label_주관/label_사용) 위치 스캔
-        2. 전역 헤더 다음 행부터 df_data로 추출
-        3. col=c_code에 유효 코드가 있는 행을 블록 헤더로 감지
-        4. 블록별로 (출력전표 번호, 부서 행) 레코드 생성
-        5. 형변환·공백제거 후 "nan" 문자열 제거
-        6. 출력전표 없는 행 제거
+    각 열은 자신의 헤더 행 다음 행부터 독립적으로 수집되므로
+    열 간 행 위치는 무관하다. ffill 없음.
+    반환: [출력전표, 귀속_주관부서, 귀속_사용부서] (짧은 열은 NaN 패딩)
     """
-    col_전표    = COLUMN_MAP["출력전표"]
+    col_코드_out = COLUMN_MAP["출력전표"]
     col_주관_out = COLUMN_MAP["귀속_주관부서"]
     col_사용_out = COLUMN_MAP["귀속_사용부서"]
-    _EMPTY = pd.DataFrame(columns=[col_전표, col_주관_out, col_사용_out])
+    _EMPTY = pd.DataFrame(columns=[col_코드_out, col_주관_out, col_사용_out])
 
     if df_raw.empty:
         return _EMPTY
 
-    # ── 1. 전역 레이블 위치 스캔 (최대 _HEADER_SCAN_ROWS 행) ─────────────────
-    _label_pos: dict[str, tuple[int, int] | None] = {
-        label_코드: None,
-        label_주관: None,
-        label_사용: None,
-    }
+    # ── 1. 각 헤더의 열 위치와 헤더 행 번호를 독립적으로 탐색 ────────────────────
+    c_코드: int | None = None
+    c_주관: int | None = None
+    c_사용: int | None = None
+    hr_코드: int | None = None
+    hr_주관: int | None = None
+    hr_사용: int | None = None
+
     for row_i in range(min(_HEADER_SCAN_ROWS, len(df_raw))):
         for col_i, val in enumerate(df_raw.iloc[row_i]):
             v = str(val).strip()
-            if v in _label_pos and _label_pos[v] is None:
-                _label_pos[v] = (row_i, col_i)
-        if all(v is not None for v in _label_pos.values()):
-            break
+            if v == label_코드 and c_코드 is None:
+                c_코드 = col_i
+                hr_코드 = row_i
+            if v == label_주관 and c_주관 is None:
+                c_주관 = col_i
+                hr_주관 = row_i
+            if v == label_사용 and c_사용 is None:
+                c_사용 = col_i
+                hr_사용 = row_i
 
-    if _label_pos[label_코드] is None:
+    # 주관부서 열은 필수
+    if c_주관 is None or hr_주관 is None:
         return _EMPTY
 
-    r_code, c_code = _label_pos[label_코드]
-    c_주관 = _label_pos[label_주관][1] if _label_pos[label_주관] else None
-    c_사용 = _label_pos[label_사용][1] if _label_pos[label_사용] else None
+    # ── 2. 각 열을 독립적으로 수집 (헤더 다음 행부터) ────────────────────────────
+    _EXCLUDED = {"", "nan", label_코드, label_주관, label_사용}
 
-    if c_주관 is None:
-        return _EMPTY
+    # 출력전표
+    if c_코드 is not None and hr_코드 is not None:
+        코드_vals = (
+            df_raw.iloc[hr_코드 + 1:, c_코드]
+            .apply(_parse_output_code)
+            .dropna()
+            .reset_index(drop=True)
+        )
+    else:
+        코드_vals = pd.Series(dtype=object)
 
-    # ── 2. 전역 헤더 다음 행부터 추출 ───────────────────────────────────────
-    df_data = df_raw.iloc[r_code + 1:].reset_index(drop=True)
+    # 주관부서
+    주관_raw = df_raw.iloc[hr_주관 + 1:, c_주관].astype(str).str.strip()
+    주관_vals = 주관_raw[~주관_raw.isin(_EXCLUDED)].dropna().reset_index(drop=True)
 
-    # ── 3. 블록 헤더 행 감지 & 전체 출력전표 코드 수집 ────────────────────────
-    # 블록 헤더: c_code에 유효 코드가 있는 모든 행 (c_주관 값 무관)
-    # _parse_output_code()로 숫자형(5001) · 영문혼합(A001) 코드 모두 허용
-    _DEPT_LABELS = {"", label_주관, label_사용}
-    _extra_reserved: frozenset[str] = frozenset({label_코드})
-    all_output_codes: list[str] = []
-    header_indices: list[int] = []
-    for row_i in range(len(df_data)):
-        val = df_data.iloc[row_i, c_code]
-        code_str = _parse_output_code(val, _extra_reserved)
-        if code_str is None:
-            continue
-        if code_str not in all_output_codes:
-            all_output_codes.append(code_str)
-        header_indices.append(row_i)
+    # 사용부서
+    if c_사용 is not None and hr_사용 is not None:
+        사용_raw = df_raw.iloc[hr_사용 + 1:, c_사용].astype(str).str.strip()
+        사용_vals = 사용_raw[~사용_raw.isin(_EXCLUDED)].dropna().reset_index(drop=True)
+    else:
+        사용_vals = pd.Series(dtype=str)
 
-    if not header_indices:
-        return _EMPTY
+    # ── 3. 가장 긴 열 기준 DataFrame (짧은 열은 NaN 패딩) ─────────────────────────
+    result = pd.DataFrame({
+        col_코드_out: 코드_vals,
+        col_주관_out: 주관_vals,
+        col_사용_out: 사용_vals,
+    })
 
-    # ── 4. 블록별 레코드 생성 ────────────────────────────────────────────────
-    records = []
-    for idx, h in enumerate(header_indices):
-        전표_raw = _parse_output_code(df_data.iloc[h, c_code], _extra_reserved) or ""
-        next_h = header_indices[idx + 1] if idx + 1 < len(header_indices) else len(df_data)
-
-        # 블록 헤더 행(h) 자체에 부서 데이터가 있는 경우 (코드+부서 동일 행 형식) 첫 레코드 등록
-        주관_h = df_data.iloc[h, c_주관]
-        if not pd.isna(주관_h) and str(주관_h).strip() not in _DEPT_LABELS:
-            사용_h = df_data.iloc[h, c_사용] if c_사용 is not None else pd.NA
-            records.append({
-                col_전표:     전표_raw,
-                col_주관_out: 주관_h,
-                col_사용_out: 사용_h,
-            })
-
-        before_count = len(records)
-        for d in range(h + 1, next_h):
-            주관_val = df_data.iloc[d, c_주관]
-            사용_val = df_data.iloc[d, c_사용] if c_사용 is not None else pd.NA
-            if pd.isna(주관_val) and pd.isna(사용_val):
-                continue
-            records.append({
-                col_전표:     전표_raw,
-                col_주관_out: 주관_val,
-                col_사용_out: 사용_val,
-            })
-        if len(records) == before_count:
-            records.append({
-                col_전표:     전표_raw,
-                col_주관_out: pd.NA,
-                col_사용_out: pd.NA,
-            })
-
-    processed_codes = {r[col_전표] for r in records}
-    for code in all_output_codes:
-        if code not in processed_codes:
-            records.append({
-                col_전표:     code,
-                col_주관_out: pd.NA,
-                col_사용_out: pd.NA,
-            })
-
-    if not records:
-        return _EMPTY
-
-    result = pd.DataFrame(records)
-
-    # ── 5. 형변환·공백제거 + "nan" 문자열 제거 ───────────────────────────────
-    result = cleanse_types(result, [col_전표])
-    result = cleanse_whitespace(result)
-    for col in [col_주관_out, col_사용_out]:
-        result[col] = result[col].replace("nan", pd.NA)
-
-    # ── 6. 출력전표 없는 행 제거 ─────────────────────────────────────────────
-    result = result.dropna(subset=[col_전표])
-    result = result[result[col_전표] != ""].reset_index(drop=True)
-
-    return result[[col_전표, col_주관_out, col_사용_out]]
+    return result
 
 
 # ════════════════════════════════════════════════════════════════════════════

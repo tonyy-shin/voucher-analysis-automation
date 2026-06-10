@@ -106,7 +106,7 @@ def filter_by_keyword(df_actual: pd.DataFrame, keyword: str) -> pd.DataFrame:
     # UI 입력 공백 재방어
     keyword_clean = keyword.strip()
 
-    mask = df_actual[col].str.contains(keyword_clean, na=False, regex=False)
+    mask = df_actual[col].str.strip() == keyword_clean
     df_filtered = df_actual[mask].copy()
 
     if df_filtered.empty:
@@ -247,30 +247,39 @@ def enrich_data(
 def calc_dept_attribution(
     df_enriched: pd.DataFrame,
     df_output: pd.DataFrame = None,
-    df_output_all: pd.DataFrame = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     주관부서별·사용부서별 대상금액 합계 및 구성비(%)를 계산한다.
 
-    [산출 우선순위]
-    sentinel 케이스 (df_output 존재하나 귀속_주관부서·귀속_사용부서 전부 NA):
-        df_output_all 전체(全 출력전표 F열/G열 합집합)에서 팀명을 검색하여 주관/사용 분류.
-        어느 열에도 없는 팀은 미분류 처리(표시 제외).
-    비sentinel 케이스:
-        1차: 팀 매칭 — df_output에 부서명이 있으면 팀 컬럼 기준 금액 합산.
-        2차: groupby 폴백 — 귀속_주관부서/귀속_사용부서 기준 집계.
+    [산출 로직]
+    df_output(출력> 시트 전체 flat lookup)의 귀속_주관부서·귀속_사용부서 열에서
+    각각 set을 구성하고, 실제발생사업비 팀 각각을 집합 멤버십으로 분류한다.
+        - 주관_set에만 있음 -> 주관부서
+        - 사용_set에만 있음 -> 사용부서
+        - 양쪽 모두 있음   -> 주관부서 우선
+        - 어디에도 없음    -> 미분류, 표시 제외
+    df_output가 없거나 비어 있으면 귀속_주관/사용부서 콜럼 기준 groupby 폴백.
 
     Args:
-        df_enriched:   enrich_data()의 반환값 ('대상금액', '팀', '귀속_*' 컬럼 포함)
-        df_output:     현재 keyword에 해당하는 출력> 행 (sentinel 판별에 사용)
-        df_output_all: 출력> 시트 전체 DataFrame (sentinel 전역 lookup에 사용)
+        df_enriched: enrich_data()의 반환값 ('대상금액', '팀' 콜럼 포함)
+        df_output:   출력> 시트 전체 flat lookup DataFrame
 
     Returns:
         (df_주관부서, df_사용부서) 튜플.
-        각 DataFrame 컬럼: ['부서명', '대상금액', '구성비(%)']
+        각 DataFrame 콜럼: ['부서명', '대상금액', '구성비(%)']
         금액 내림차순 정렬.
     """
     empty = pd.DataFrame(columns=["부서명", "대상금액", "구성비(%)"])
+
+    def _finalize(rows: list) -> pd.DataFrame:
+        if not rows:
+            return empty.copy()
+        df_r = pd.DataFrame(rows)
+        total = df_r["대상금액"].sum()
+        df_r["구성비(%)"] = (
+            df_r["대상금액"].div(total).mul(100).round(2) if total != 0 else 0.0
+        )
+        return df_r.sort_values("대상금액", ascending=False).reset_index(drop=True)
 
     def _build_from_groupby(dept_col: str) -> pd.DataFrame:
         if dept_col not in df_enriched.columns:
@@ -287,133 +296,52 @@ def calc_dept_attribution(
         )
         return grouped.sort_values("대상금액", ascending=False).reset_index(drop=True)
 
-    def _build_from_team_match(dept_col_in_output: str) -> pd.DataFrame | None:
-        """출력> 부서명 기준으로 팀 필터 집계. 조건 미충족 시 None 반환."""
-        if (df_output is None or df_output.empty
-                or dept_col_in_output not in df_output.columns
-                or COL_TEAM not in df_enriched.columns):
-            return None
-
-        dept_list = df_output[dept_col_in_output].dropna().unique()
-        rows = []
-        for dept in dept_list:
-            dept_str = str(dept).strip()
-            if dept_str in ("", FALLBACK_TEXT):
-                continue
-            _amt_col = COL_SUBTOTAL if COL_SUBTOTAL in df_enriched.columns else "대상금액"
-            amount = float(
-                df_enriched.loc[df_enriched[COL_TEAM] == dept_str, _amt_col].sum()
-            )
-            if not (df_enriched[COL_TEAM] == dept_str).any():
-                continue
-            rows.append({"부서명": dept_str, "대상금액": amount})
-
-        if not rows:
-            return None
-
-        result = pd.DataFrame(rows)
-        total = result["대상금액"].sum()
-        result["구성비(%)"] = (
-            result["대상금액"].div(total).mul(100).round(2) if total != 0 else 0.0
+    # -- df_output 없음 -> groupby 폴백 -----------------------------------------------
+    if df_output is None or df_output.empty or COL_TEAM not in df_enriched.columns:
+        return (
+            _build_from_groupby(COLUMN_MAP["귀속_주관부서"]),
+            _build_from_groupby(COLUMN_MAP["귀속_사용부서"]),
         )
-        return result.sort_values("대상금액", ascending=False).reset_index(drop=True)
 
-    def _is_sentinel() -> bool:
-        """귀속_주관부서·귀속_사용부서가 모두 NA인 출력전표 = sentinel."""
-        if df_output is None or df_output.empty:
-            return False
-        주관_na = (
-            COLUMN_MAP["귀속_주관부서"] not in df_output.columns
-            or df_output[COLUMN_MAP["귀속_주관부서"]].isna().all()
+    # -- 출력> 전체 열에서 주관/사용 set 구성 ------------------------------------------
+    def _make_set(col: str) -> set:
+        if col not in df_output.columns:
+            return set()
+        vals = df_output[col].dropna().astype(str).str.strip()
+        return set(vals[~vals.isin({"", FALLBACK_TEXT})].tolist())
+
+    주관_set = _make_set(COLUMN_MAP["귀속_주관부서"])
+    사용_set  = _make_set(COLUMN_MAP["귀속_사용부서"])
+
+    # -- 팀별 set 멤버십 분류 ----------------------------------------------------------
+    주관_rows = []
+    사용_rows = []
+
+    for team in df_enriched[COL_TEAM].dropna().unique():
+        team_str = str(team).strip()
+        if not team_str or team_str == FALLBACK_TEXT:
+            continue
+
+        in_주관 = team_str in 주관_set
+        in_사용 = team_str in 사용_set
+
+        if not in_주관 and not in_사용:
+            continue  # 어느 열에도 없음 -> 미분류, 표시 제외
+
+        amount = float(
+            df_enriched.loc[df_enriched[COL_TEAM] == team_str, "대상금액"].sum()
         )
-        사용_na = (
-            COLUMN_MAP["귀속_사용부서"] not in df_output.columns
-            or df_output[COLUMN_MAP["귀속_사용부서"]].isna().all()
-        )
-        return bool(주관_na and 사용_na)
 
-    def _build_from_global_lookup() -> tuple[pd.DataFrame, pd.DataFrame]:
-        """sentinel 케이스: df_output_all 전체 F열/G열로 팀을 주관/사용 분류.
+        # 양쪽 모두 있을 때는 주관부서 우선
+        if in_주관 and not in_사용:
+            주관_rows.append({"부서명": team_str, "대상금액": amount})
+        elif in_사용 and not in_주관:
+            사용_rows.append({"부서명": team_str, "대상금액": amount})
+        else:
+            주관_rows.append({"부서명": team_str, "대상금액": amount})
 
-        단순 집합 멤버십(set) 대신 등장 횟수(value_counts)를 사용한다.
-        F열과 G열 양쪽에 등록된 팀은 등장 횟수 다수결로 분류하고,
-        동수이면 사용부서를 우선한다.
-        """
-        if (df_output_all is None or df_output_all.empty
-                or COL_TEAM not in df_enriched.columns):
-            return empty.copy(), empty.copy()
+    return _finalize(주관_rows), _finalize(사용_rows)
 
-        def _col_counts(col: str) -> dict[str, int]:
-            """해당 열에서 각 팀명의 등장 횟수를 반환한다."""
-            if col not in df_output_all.columns:
-                return {}
-            vals = (
-                df_output_all[col]
-                .dropna()
-                .astype(str)
-                .str.strip()
-            )
-            return (
-                vals[~vals.isin({"", FALLBACK_TEXT})]
-                .value_counts()
-                .to_dict()
-            )
-
-        주관_counts = _col_counts(COLUMN_MAP["귀속_주관부서"])
-        사용_counts = _col_counts(COLUMN_MAP["귀속_사용부서"])
-
-        _amt_col = COL_SUBTOTAL if COL_SUBTOTAL in df_enriched.columns else "대상금액"
-        주관_rows: list[dict] = []
-        사용_rows: list[dict] = []
-
-        for team in df_enriched[COL_TEAM].dropna().unique():
-            team_str = str(team).strip()
-            if not team_str or team_str == FALLBACK_TEXT:
-                continue
-
-            n_주관 = 주관_counts.get(team_str, 0)
-            n_사용 = 사용_counts.get(team_str, 0)
-
-            if n_주관 == 0 and n_사용 == 0:
-                continue  # 어느 열에도 없음 → 미분류, 표시 제외
-
-            amount = float(
-                df_enriched.loc[df_enriched[COL_TEAM] == team_str, _amt_col].sum()
-            )
-
-            # 다수결: F열 등장 횟수가 G열보다 많을 때만 주관, 그 외(동수 포함)는 사용
-            if n_주관 > n_사용:
-                주관_rows.append({"부서명": team_str, "대상금액": amount})
-            else:
-                사용_rows.append({"부서명": team_str, "대상금액": amount})
-
-        def _finalize(rows: list) -> pd.DataFrame:
-            if not rows:
-                return empty.copy()
-            df_r = pd.DataFrame(rows)
-            total = df_r["대상금액"].sum()
-            df_r["구성비(%)"] = (
-                df_r["대상금액"].div(total).mul(100).round(2) if total != 0 else 0.0
-            )
-            return df_r.sort_values("대상금액", ascending=False).reset_index(drop=True)
-
-        return _finalize(주관_rows), _finalize(사용_rows)
-
-    # ── sentinel 케이스: 전역 F열/G열 lookup으로 주관/사용 분류 ─────────────
-    if _is_sentinel():
-        df_주관, df_사용 = _build_from_global_lookup()
-        return df_주관, df_사용
-
-    # ── 비sentinel 케이스: 기존 팀 매칭 → groupby 폴백 ──────────────────────
-    df_주관 = _build_from_team_match(COLUMN_MAP["귀속_주관부서"])
-    if df_주관 is None:
-        df_주관 = _build_from_groupby(COLUMN_MAP["귀속_주관부서"])
-
-    df_사용 = _build_from_team_match(COLUMN_MAP["귀속_사용부서"])
-    if df_사용 is None:
-        df_사용 = _build_from_groupby(COLUMN_MAP["귀속_사용부서"])
-
-    return df_주관, df_사용
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -487,20 +415,20 @@ def calc_direct_indirect(df_enriched: pd.DataFrame) -> dict[str, float]:
 
 def calc_nature_classification(
     df_enriched: pd.DataFrame,
-    df_output_for_keyword: pd.DataFrame = None,
+    df_output: pd.DataFrame = None,
 ) -> pd.DataFrame:
     """
     성격별(NATURE_COLS) × 부점 교차 집계 + 총계 행 추가.
 
     [집계 우선순위]
-    1차: df_output_for_keyword가 있고 df_enriched에 '팀' 컬럼이 있으면,
+    1차: df_output가 있고 df_enriched에 '팀' 컬럼이 있으면,
          실제 원가발생 기준 '팀' 컬럼으로 groupby.
          출력> 시트의 주관/사용부서 중 실제발생사업비 미입력 팀은 0원 행으로 추가.
-    2차 폴백: df_output_for_keyword가 없거나 '팀' 컬럼이 없으면 기존 귀속_사용부서 기준 groupby.
+    2차 폴백: df_output가 없거나 '팀' 컬럼이 없으면 기존 귀속_사용부서 기준 groupby.
 
     Args:
         df_enriched:           enrich_data()의 반환값
-        df_output_for_keyword: 현재 keyword에 해당하는 출력> 행 (귀속_주관부서, 귀속_사용부서 포함)
+        df_output: 현재 keyword에 해당하는 출력> 행 (귀속_주관부서, 귀속_사용부서 포함)
 
     Returns:
         컬럼: ['귀속_사용부서', '계약비', '유지비', '손해조사비', '투자관리비',
@@ -514,8 +442,8 @@ def calc_nature_classification(
     if not existing_nature:
         return pd.DataFrame()
 
-    if (df_output_for_keyword is not None
-            and not df_output_for_keyword.empty
+    if (df_output is not None
+            and not df_output.empty
             and COL_TEAM in df_enriched.columns):
 
         # 1. 실제 원가발생 팀 기준 집계
@@ -529,9 +457,9 @@ def calc_nature_classification(
         # 2. 출력> 시트 주관/사용부서 전체 수집
         all_output_depts: set[str] = set()
         for col in [COLUMN_MAP["귀속_주관부서"], COLUMN_MAP["귀속_사용부서"]]:
-            if col in df_output_for_keyword.columns:
+            if col in df_output.columns:
                 vals = (
-                    df_output_for_keyword[col]
+                    df_output[col]
                     .dropna()
                     .astype(str)
                     .str.strip()
@@ -669,17 +597,8 @@ def run_pipeline(
     df_enriched = enrich_data(df_filtered, df_ccm, df_account, df_output)
 
     # Step 3 — 부점귀속 현황
-    # 현재 keyword에 해당하는 출력> 행만 추출하여 팀 매칭 기반 금액 산출에 사용
-    df_output_for_keyword = pd.DataFrame()
-    _out_right = COLUMN_MAP["출력전표"]
-    if not df_output.empty and _out_right in df_output.columns:
-        keyword_clean = keyword.strip()
-        df_output_for_keyword = df_output[
-            df_output[_out_right] == keyword_clean
-        ].reset_index(drop=True)
-    df_주관, df_사용 = calc_dept_attribution(
-        df_enriched, df_output_for_keyword, df_output
-    )
+    # df_output 전체를 flat lookup 테이블로 사용하여 팀 주관/사용 분류
+    df_주관, df_사용 = calc_dept_attribution(df_enriched, df_output)
 
     di_result   = calc_direct_indirect(df_enriched)                      # Step 4
     _미분류경고 = di_result.pop("_미분류경고", None)
@@ -690,7 +609,7 @@ def run_pipeline(
         "dept_주관":            df_주관,                                  # Step 3
         "dept_사용":            df_사용,                                  # Step 3
         "direct_indirect":      di_result,                               # Step 4
-        "nature":               calc_nature_classification(df_enriched, df_output_for_keyword), # Step 5
+        "nature":               calc_nature_classification(df_enriched, df_output), # Step 5
         "classification_basis": CLASSIFICATION_BASIS,                    # 분류 근거 상수
         "_미분류경고":          _미분류경고,
     }
