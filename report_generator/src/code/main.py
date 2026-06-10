@@ -56,8 +56,8 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
 
     dlg = tk.Toplevel(root)
     dlg.title("포인트 색상·로고 설정")
-    dlg.attributes("-topmost", True)
     dlg.resizable(False, False)
+    dlg.lift()
 
     # ── 색상 미리보기 레이블 ──────────────────────────────────────────────
     preview_frame = tk.Frame(dlg, bd=1, relief="sunken")
@@ -180,7 +180,6 @@ def _show_validation_dialog(
     dlg.title("컬럼·시트명 검증")
     dlg.geometry("820x520")
     dlg.resizable(True, True)
-    dlg.attributes("-topmost", True)
 
     # ── 경고 헤더 ──────────────────────────────────────────────────────────
     hdr_frame = tk.Frame(dlg, bg="#FFF3CD", pady=8)
@@ -451,7 +450,10 @@ def main() -> None:
             dlg = tk.Toplevel(parent)
             dlg.title("미등록 부서 감지")
             dlg.resizable(False, False)
-            dlg.grab_set()
+            def _refocus(event=None):
+                dlg.focus_force()
+            dlg.bind("<FocusOut>", _refocus)
+            dlg.focus_force()
 
             # 상단 안내 문구
             _msg = (
@@ -559,6 +561,7 @@ def main() -> None:
     errors: list[tuple[str, str]] = []
     _pipeline_results: dict[str, dict] = {}
     _unclassified: dict[str, dict] = {}
+    _dept_warnings: dict[str, dict] = {}
 
     # ── Stage 1: 파이프라인 전체 실행 및 결과 수집 ────────────────────────
     for code in codes:
@@ -579,6 +582,20 @@ def main() -> None:
                 "warning": _w,
                 "계정명": results["account_info"].get("계정명", ""),
             }
+
+        d_주관 = results.get("dept_주관")
+        d_사용 = results.get("dept_사용")
+        _wflags = []
+        if d_주관 is not None and d_주관.empty:
+            _wflags.append("주관부서 귀속 없음")
+        if d_사용 is not None and d_사용.empty:
+            _wflags.append("사용부서 귀속 없음")
+        if _wflags:
+            _dept_warnings[code_str] = {
+                "계정명": results["account_info"].get("계정명", ""),
+                "flags": _wflags,
+            }
+
         _pipeline_results[code_str] = results
 
     # ── Stage 2: 미분류건 사전 경고 (있을 때만) ───────────────────────────
@@ -590,7 +607,10 @@ def main() -> None:
             dlg = tk.Toplevel(parent)
             dlg.title("미분류건 감지")
             dlg.resizable(False, False)
-            dlg.grab_set()
+            def _refocus(event=None):
+                dlg.focus_force()
+            dlg.bind("<FocusOut>", _refocus)
+            dlg.focus_force()
 
             _msg = (
                 "직접비·공통비로 분류되지 않은 행이 발견되었습니다.\n"
@@ -697,25 +717,8 @@ def main() -> None:
 
         successes.append(code_str)
 
-    # ── Step 7: 완료 요약 메시지 ──────────────────────────────────────────
-    summary_lines = [
-        f"처리 완료: 성공 {len(successes)}건 / 실패 {len(errors)}건",
-        "",
-    ]
-    if successes:
-        summary_lines.append(f"성공: {', '.join(successes)}")
-    if errors:
-        summary_lines.append("")
-        summary_lines.append("실패:")
-        for code_str, reason in errors:
-            summary_lines.append(f"  {code_str}: {reason}")
-
-    summary = "\n".join(summary_lines)
-
-    if errors:
-        _show_scrollable_error(root, "처리 결과", summary)
-    else:
-        messagebox.showinfo("완료", summary)
+    # ── Step 7: 완료 요약 ──────────────────────────────────────────────────
+    _show_summary_dialog(root, successes, errors, _unclassified, _dept_warnings)
 
 
 def _show_scrollable_error(root: tk.Tk, title: str, message: str) -> None:
@@ -729,7 +732,6 @@ def _show_scrollable_error(root: tk.Tk, title: str, message: str) -> None:
     """
     win = tk.Toplevel(root)
     win.title(title)
-    win.attributes("-topmost", True)
     win.resizable(True, True)
 
     lbl = tk.Label(win, text=title, font=("", 11, "bold"), fg="red", pady=6)
@@ -744,6 +746,70 @@ def _show_scrollable_error(root: tk.Tk, title: str, message: str) -> None:
     btn.pack(pady=(0, 10))
 
     win.grab_set()
+    win.wait_window()
+
+
+def _show_summary_dialog(
+    root: tk.Tk,
+    successes: list[str],
+    errors: list[tuple[str, str]],
+    unclassified: dict[str, dict],
+    dept_warnings: dict[str, dict],
+) -> None:
+    """PDF 일괄 생성 결과를 성공/경고/실패 섹션으로 구분하여 표시한다."""
+    warn_codes = set(unclassified) | set(dept_warnings)
+    n_warn = len(warn_codes)
+
+    win = tk.Toplevel(root)
+    win.title("PDF 일괄 생성 결과")
+    win.resizable(True, True)
+
+    header = f"처리 완료: 성공 {len(successes)}건 / 경고 {n_warn}건 / 실패 {len(errors)}건"
+    tk.Label(win, text=header, font=("맑은 고딕", 11, "bold"), pady=8).pack(fill="x", padx=10)
+
+    txt = scrolledtext.ScrolledText(win, width=72, height=22, wrap="word", font=("Consolas", 9))
+    txt.pack(padx=10, pady=(0, 6), fill="both", expand=True)
+
+    txt.tag_configure("success",  foreground="#2d7a2d")
+    txt.tag_configure("warning",  foreground="#c05621")
+    txt.tag_configure("error",    foreground="#c0392b")
+    txt.tag_configure("sec_bold", font=("맑은 고딕", 9, "bold"))
+
+    def _write(text: str, *tags: str) -> None:
+        txt.insert("end", text, tags)
+
+    if successes:
+        _write(f"✅ 성공 ({len(successes)}건)\n", "sec_bold", "success")
+        for code in successes:
+            _write(f"  • {code}\n", "success")
+        _write("\n")
+
+    if warn_codes:
+        _write(f"⚠️ 경고 PDF 목록 ({n_warn}건)\n", "sec_bold", "warning")
+        for code in sorted(warn_codes):
+            계정명 = (
+                unclassified.get(code, {}).get("계정명")
+                or dept_warnings.get(code, {}).get("계정명")
+                or ""
+            )
+            parts: list[str] = []
+            if code in unclassified:
+                w = unclassified[code]["warning"]
+                parts.append(f"직간접 미분류 (미분류금액: {w['미분류금액']:,.0f}원)")
+            if code in dept_warnings:
+                parts.extend(dept_warnings[code]["flags"])
+            _write(f"  • [{code}] {계정명} — {' / '.join(parts)}\n", "warning")
+        _write("\n")
+
+    if errors:
+        _write(f"❌ 실패 ({len(errors)}건)\n", "sec_bold", "error")
+        for code, reason in errors:
+            _write(f"  • {code}: {reason}\n", "error")
+
+    txt.configure(state="disabled")
+
+    tk.Button(win, text="확인", width=10, command=win.destroy).pack(pady=(0, 10))
+
     win.wait_window()
 
 
