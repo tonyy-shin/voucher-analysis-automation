@@ -561,7 +561,6 @@ def main() -> None:
     errors: list[tuple[str, str]] = []
     _pipeline_results: dict[str, dict] = {}
     _unclassified: dict[str, dict] = {}
-    _dept_warnings: dict[str, dict] = {}
 
     # ── Stage 1: 파이프라인 전체 실행 및 결과 수집 ────────────────────────
     for code in codes:
@@ -581,19 +580,6 @@ def main() -> None:
             _unclassified[code_str] = {
                 "warning": _w,
                 "계정명": results["account_info"].get("계정명", ""),
-            }
-
-        d_주관 = results.get("dept_주관")
-        d_사용 = results.get("dept_사용")
-        _wflags = []
-        if d_주관 is not None and d_주관.empty:
-            _wflags.append("주관부서 귀속 없음")
-        if d_사용 is not None and d_사용.empty:
-            _wflags.append("사용부서 귀속 없음")
-        if _wflags:
-            _dept_warnings[code_str] = {
-                "계정명": results["account_info"].get("계정명", ""),
-                "flags": _wflags,
             }
 
         _pipeline_results[code_str] = results
@@ -718,7 +704,7 @@ def main() -> None:
         successes.append(code_str)
 
     # ── Step 7: 완료 요약 ──────────────────────────────────────────────────
-    _show_summary_dialog(root, successes, errors, _unclassified, _dept_warnings)
+    _show_summary_dialog(root, successes, errors, _unclassified, _unregistered)
 
 
 def _show_scrollable_error(root: tk.Tk, title: str, message: str) -> None:
@@ -754,11 +740,11 @@ def _show_summary_dialog(
     successes: list[str],
     errors: list[tuple[str, str]],
     unclassified: dict[str, dict],
-    dept_warnings: dict[str, dict],
+    unregistered: list[str],
 ) -> None:
     """PDF 일괄 생성 결과를 성공/경고/실패 섹션으로 구분하여 표시한다."""
-    warn_codes = set(unclassified) | set(dept_warnings)
-    n_warn = len(warn_codes)
+    warn_codes = set(unclassified)
+    n_warn = len(warn_codes) + (1 if unregistered else 0)
 
     win = tk.Toplevel(root)
     win.title("PDF 일괄 생성 결과")
@@ -784,21 +770,19 @@ def _show_summary_dialog(
             _write(f"  • {code}\n", "success")
         _write("\n")
 
-    if warn_codes:
+    if warn_codes or unregistered:
         _write(f"⚠️ 경고 PDF 목록 ({n_warn}건)\n", "sec_bold", "warning")
         for code in sorted(warn_codes):
-            계정명 = (
-                unclassified.get(code, {}).get("계정명")
-                or dept_warnings.get(code, {}).get("계정명")
-                or ""
-            )
+            계정명 = unclassified.get(code, {}).get("계정명") or ""
             parts: list[str] = []
             if code in unclassified:
                 w = unclassified[code]["warning"]
                 parts.append(f"직간접 미분류 (미분류금액: {w['미분류금액']:,.0f}원)")
-            if code in dept_warnings:
-                parts.extend(dept_warnings[code]["flags"])
             _write(f"  • [{code}] {계정명} — {' / '.join(parts)}\n", "warning")
+        if unregistered:
+            _write(f"\n  [미등록 팀 — 집계 누락 가능성]\n", "warning")
+            for team in unregistered:
+                _write(f"  • {team}\n", "warning")
         _write("\n")
 
     if errors:
