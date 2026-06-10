@@ -18,8 +18,6 @@ from data_loader import (
     _SHEET_TRANSACTION, _SHEET_CCM, _SHEET_ACCOUNT, _SHEET_OUTPUT,
 )
 
-_MAX_HINT_ITEMS = 30  # filter_by_keyword() 오류 메시지에 표시할 최대 코드 수
-
 # ── 분류 근거 텍스트 ──────────────────────────────────────────────────────────
 # NATURE_COLS 항목 추가 시 _NATURE_BASIS_TEXTS에만 텍스트를 추가하면 자동 반영됨
 _DI_BASIS: dict[str, str] = {
@@ -110,14 +108,8 @@ def filter_by_keyword(df_actual: pd.DataFrame, keyword: str) -> pd.DataFrame:
     df_filtered = df_actual[mask].copy()
 
     if df_filtered.empty:
-        unique_vals = sorted(df_actual[col].dropna().unique())
-        hint_lines = "\n".join(f"  {v}" for v in unique_vals[:_MAX_HINT_ITEMS])
-        ellipsis = f"\n  ... 외 {len(unique_vals) - _MAX_HINT_ITEMS}개" if len(unique_vals) > _MAX_HINT_ITEMS else ""
         raise ValueError(
-            f"코드번호 '{keyword_clean}'에 해당하는 원가요소가 없습니다.\n\n"
-            f"[힌트] '원가요소' 컬럼의 실제 코드 목록 (최대 30개):\n"
-            f"{hint_lines}{ellipsis}\n\n"
-            f"출력> 시트의 '출력전표' 코드와 동일한 값을 입력하세요."
+            f"코드번호 '{keyword_clean}'에 해당하는 원가요소가 없습니다."
         )
 
     return df_filtered
