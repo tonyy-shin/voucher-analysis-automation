@@ -539,20 +539,19 @@ def main() -> None:
         )
         sys.exit(1)
 
-    # ── Step 5: 출력전표 코드 목록 추출 ───────────────────────────────────
-    col_output = COLUMN_MAP["출력전표"]
-    df_output = sheets.get(_SHEET_OUTPUT)
-    if df_output is None or df_output.empty or col_output not in df_output.columns:
+    # ── Step 5: 출력전표 코드 목록 수집 (출력> 시트의 출력전표 컬럼에서) ──────────
+    col_output_code = COLUMN_MAP["출력전표"]
+    df_output = sheets[_SHEET_OUTPUT]
+    codes = (
+        df_output[col_output_code].dropna().astype(str).str.strip().unique().tolist()
+        if col_output_code in df_output.columns else []
+    )
+    codes = [c for c in codes if c]
+    if not codes:
         messagebox.showerror(
             "데이터 오류",
-            f"'{_SHEET_OUTPUT}' 시트에서 '{col_output}' 컬럼을 찾을 수 없습니다.\n"
-            f"입력 파일의 '{_SHEET_OUTPUT}' 시트 구조를 확인하세요.",
+            f"'{_SHEET_OUTPUT}' 시트의 '{col_output_code}' 컬럼에 처리할 출력전표 코드가 없습니다.",
         )
-        sys.exit(1)
-
-    codes = df_output[col_output].dropna().unique().tolist()
-    if not codes:
-        messagebox.showerror("데이터 오류", f"'{_SHEET_OUTPUT}' 시트에 처리할 출력전표 코드가 없습니다.")
         sys.exit(1)
 
     # ── Step 6: 코드별 파이프라인 루프 ────────────────────────────────────
