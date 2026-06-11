@@ -83,7 +83,6 @@ _WIDTH  = _PAGE[0] - 2 * _MARGIN
 
 # ── 색상 ──────────────────────────────────────────────────────────────────────
 # 브랜드 무관 고정 색상만 유지; 포인트 색상은 CompanyTheme 을 통해 런타임에 주입된다.
-_YELLOW = colors.HexColor('#FFFF00')   # 데이터 입력 셀 (미사용 유지)
 _BLACK  = colors.black
 _WHITE  = colors.white
 

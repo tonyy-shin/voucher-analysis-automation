@@ -38,7 +38,6 @@ _LOGOS_DEFAULT: list[tuple[str, int]] = [
 # ── 기본 회색 테마 — config 파일 없거나 손상 시 자동 적용 ──────────────────────
 GRAY_DEFAULT = CompanyTheme(
     primary_hex="#808080",
-    primary_light_hex="#C8C8C8",
     logos=_LOGOS_DEFAULT,
     logo_paths=[],
 )
@@ -76,7 +75,6 @@ def load_theme() -> CompanyTheme:
 
         return CompanyTheme(
             primary_hex=primary,
-            primary_light_hex=_derive_light(primary),
             logos=_LOGOS_DEFAULT,
             logo_paths=logo_paths,
         )
@@ -137,14 +135,3 @@ def _validate_hex(s: str) -> str:
     return s.upper()
 
 
-def _derive_light(hex_str: str) -> str:
-    """primary 색상을 흰색과 60% 블렌딩하여 밝은 변형 색상을 반환한다.
-
-    계산식: 각 채널 = round(primary_channel * 0.4 + 255 * 0.6)
-    int() 대신 round() 사용으로 반올림 오차를 방지한다.
-    """
-    h = hex_str.lstrip('#')
-    r = round(int(h[0:2], 16) * 0.4 + 255 * 0.6)
-    g = round(int(h[2:4], 16) * 0.4 + 255 * 0.6)
-    b = round(int(h[4:6], 16) * 0.4 + 255 * 0.6)
-    return f'#{r:02X}{g:02X}{b:02X}'

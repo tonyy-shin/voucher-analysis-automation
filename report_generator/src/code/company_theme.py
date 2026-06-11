@@ -20,7 +20,6 @@ class CompanyTheme:
                            각 경로는 load 시 파일 존재 여부가 검증된다.
     """
     primary_hex: str
-    primary_light_hex: str
     logos: list[tuple[str, int]]
     logo_paths: list[str] = field(default_factory=list)
 
@@ -28,8 +27,3 @@ class CompanyTheme:
     def primary_color(self):
         from reportlab.lib import colors
         return colors.HexColor(self.primary_hex)
-
-    @property
-    def primary_light_color(self):
-        from reportlab.lib import colors
-        return colors.HexColor(self.primary_light_hex)

@@ -7,7 +7,6 @@ data_loader.py
 """
 from __future__ import annotations
 
-import difflib
 import re
 
 import pandas as pd
@@ -56,22 +55,6 @@ COLUMN_MAP: dict[str, str] = {
 }
 
 
-# ── Fuzzy 컬럼 탐색 패턴 (버전번호·공백 변동이 잦은 컬럼) ─────────────────────
-# resolve_col()에서 정규식 탐색에 사용. 키는 COLUMN_MAP 키와 일치해야 함.
-_COLUMN_PATTERNS: dict[str, str] = {
-    "대상정의":   r"대상정의",
-    "직간접구분": r"직간접\s*구분",
-    "cc_code":   r"[Cc]ost\s*[Cc]enter\s*[Cc]ode",
-    "cc_name":   r"[Cc]ost\s*[Cc]enter\s*[Nn]ame",
-    "범위":      r"사용\s*부서",
-    "지급대상":  r"비용\s*지급\s*범위",
-}
-# ── Cost Center Master 리네임 맵 ─────────────────────────────────────────────
-# read_excel 시 중복 열 이름(Code, Code.1)을 의미 있는 이름으로 교정
-_CCM_RENAME_MAP: dict[str, str] = {
-    "Code":   "본부_Code",
-    "Code.1": "팀_Code",
-}
 
 # ── 각 시트에서 실제로 필요한 컬럼 목록 ──────────────────────────────────────
 def _get_ccm_cols_needed() -> list[str]:
@@ -716,80 +699,14 @@ def _find_ccm_header_row(wb_path: str, sheet_name: str = _SHEET_CCM) -> int:
     )
 
 
-# ════════════════════════════════════════════════════════════════════════════
-#  Fuzzy Resolver — config 기반 컬럼·시트명 유연 탐색 (Phase 2 신규)
-# ════════════════════════════════════════════════════════════════════════════
-
-def resolve_col(df: pd.DataFrame, logical_name: str) -> str | None:
-    """
-    DataFrame에서 논리명에 해당하는 실제 컬럼명을 탐색한다.
-
-    탐색 우선순위:
-        1. COLUMN_MAP[logical_name] exact match (기존 동작 유지)
-        2. _COLUMN_PATTERNS[logical_name] regex scan over df.columns
-        3. difflib.get_close_matches(COLUMN_MAP[logical_name], df.columns, cutoff=0.8)
-        4. None 반환
-
-    Args:
-        df:           탐색 대상 DataFrame
-        logical_name: COLUMN_MAP 키 (예: "대상정의", "cc_code")
-
-    Returns:
-        찾은 실제 컬럼명. 모든 단계 실패 시 None.
-    """
-    expected = COLUMN_MAP.get(logical_name)
-    if expected is None:
-        return None
-
-    # 1. Exact match
-    if expected in df.columns:
-        return expected
-
-    # 2. Regex scan
-    pattern = _COLUMN_PATTERNS.get(logical_name)
-    if pattern:
-        for col in df.columns:
-            if re.search(pattern, col):
-                return col
-
-    # 3. Fuzzy match
-    candidates = list(df.columns)
-    matches = difflib.get_close_matches(expected, candidates, n=1, cutoff=0.8)
-    if matches:
-        return matches[0]
-
-    return None
-
-
-def _resolve_sheet_name(sheet_names: list[str], target: str) -> str | None:
-    """
-    Excel 시트 목록에서 target과 가장 유사한 시트명을 반환한다.
-
-    탐색 우선순위:
-        1. Exact match
-        2. difflib.get_close_matches(target, sheet_names, cutoff=0.7)
-        3. None 반환
-
-    Args:
-        sheet_names: pd.ExcelFile.sheet_names
-        target:      탐색할 시트명
-
-    Returns:
-        찾은 시트명. 실패 시 None.
-    """
-    if target in sheet_names:
-        return target
-    matches = difflib.get_close_matches(target, sheet_names, n=1, cutoff=0.7)
-    return matches[0] if matches else None
-
 
 def _rename_duplicate_code_cols(df: pd.DataFrame) -> pd.DataFrame:
     """
     Cost Center Master에서 pandas가 자동 생성한 'Code', 'Code.1', 'Code.2'...를
     위치 순서대로 의미 있는 이름('본부_Code', '팀_Code')으로 교체한다.
 
-    기존 _CCM_RENAME_MAP 방식은 pandas 버전 따라 자동 접미사(Code.1→Code.2 등)가
-    달라지면 조용히 실패하므로, 정규식으로 패턴을 탐지하여 위치 기반으로 처리한다.
+    pandas 버전에 따라 자동 접미사가 달라질 수 있으므로 정규식으로 패턴을 탐지하여
+    위치 기반으로 처리한다.
     """
     labels = ["본부_Code", "팀_Code"]
     counter = 0

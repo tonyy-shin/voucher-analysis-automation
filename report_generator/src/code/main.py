@@ -46,8 +46,6 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
         [취소] 또는 X 버튼: 원본 theme 반환 (저장 안 함)
         [기본값 복원] 클릭: GRAY_DEFAULT 저장 후 반환
     """
-    from theme_manager import _derive_light  # 내부 헬퍼 재사용
-
     result = [theme]
     current_hex = [theme.primary_hex]
 
@@ -138,7 +136,6 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
         valid_paths = [p for p in slots if p]
         new_theme = CompanyTheme(
             primary_hex=current_hex[0],
-            primary_light_hex=_derive_light(current_hex[0]),
             logos=theme.logos,
             logo_paths=valid_paths,
         )
@@ -707,33 +704,6 @@ def main() -> None:
     _show_summary_dialog(root, successes, errors, _unclassified, _unregistered)
 
 
-def _show_scrollable_error(root: tk.Tk, title: str, message: str) -> None:
-    """
-    긴 메시지를 스크롤 가능한 창으로 표시한다.
-
-    Args:
-        root:    tkinter 루트 창 (부모)
-        title:   창 제목
-        message: 표시할 전체 메시지
-    """
-    win = tk.Toplevel(root)
-    win.title(title)
-    win.resizable(True, True)
-
-    lbl = tk.Label(win, text=title, font=("", 11, "bold"), fg="red", pady=6)
-    lbl.pack(fill="x", padx=10)
-
-    txt = scrolledtext.ScrolledText(win, width=70, height=20, wrap="word", font=("Consolas", 9))
-    txt.pack(padx=10, pady=(0, 6), fill="both", expand=True)
-    txt.insert("1.0", message)
-    txt.configure(state="disabled")
-
-    btn = tk.Button(win, text="확인", width=10, command=win.destroy)
-    btn.pack(pady=(0, 10))
-
-    win.grab_set()
-    win.wait_window()
-
 
 def _show_summary_dialog(
     root: tk.Tk,
@@ -777,7 +747,7 @@ def _show_summary_dialog(
             parts: list[str] = []
             if code in unclassified:
                 w = unclassified[code]["warning"]
-                parts.append(f"직간접 미분류 (미분류금액: {w['미분류금액']:,.0f}원)")
+                parts.append(f"직접/공통 미분류 (미분류금액: {w['미분류금액']:,.0f}원)")
             _write(f"  • [{code}] {계정명} — {' / '.join(parts)}\n", "warning")
         if unregistered:
             _write(f"\n  [미등록 팀 — 집계 누락 가능성]\n", "warning")
