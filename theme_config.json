@@ -1,14 +1,9 @@
 {
   "primary_hex": "#808080",
-  "logo_max_height": 96,
+  "logo_max_height": 48,
   "logo_heights": [
-    31,
-    96,
-    33
-  ],
-  "logo_paths": [
-    "C:/Users/tonys/Downloads/ey logo.png",
-    "C:/Users/tonys/Downloads/라이나_생명보험_로고.jpg",
-    "C:/Users/tonys/OneDrive/문서/신예훈 중요 폴더/Internshipwork/real/260528.전표분석서_자동화/python_data_cleaning/images/우리금융그룹.png"
+    48,
+    48,
+    48
   ]
 }
