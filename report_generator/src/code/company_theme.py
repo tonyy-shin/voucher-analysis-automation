@@ -18,10 +18,20 @@ class CompanyTheme:
         logos:             [(파일명, 높이pt), ...] — Fallback 기본 로고 목록.
         logo_paths:        사용자가 지정한 로고 절대 경로 목록 (최대 3개, 빈 리스트 = 기본 로고 사용).
                            각 경로는 load 시 파일 존재 여부가 검증된다.
+        logo_max_height:   로고 공통 기본 높이 (pt). logo_heights 의 fallback 기본값으로만 사용.
+        logo_heights:      슬롯별 로고 최대 높이 (pt) 리스트, 길이 3.
+                           __post_init__ 에서 logo_max_height 로 자동 패딩된다.
     """
     primary_hex: str
     logos: list[tuple[str, int]]
     logo_paths: list[str] = field(default_factory=list)
+    logo_max_height: int = 48
+    logo_heights: list[int] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        needed = 3 - len(self.logo_heights)
+        if needed > 0:
+            self.logo_heights = list(self.logo_heights) + [self.logo_max_height] * needed
 
     @property
     def primary_color(self):

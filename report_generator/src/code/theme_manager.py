@@ -73,10 +73,26 @@ def load_theme() -> CompanyTheme:
         else:
             logo_paths = []
 
+        logo_max_height = int(data.get("logo_max_height", 48))
+        logo_max_height = max(24, min(96, logo_max_height))
+
+        raw_heights = data.get("logo_heights", [])
+        if isinstance(raw_heights, list):
+            logo_heights = [
+                max(16, min(96, int(h)))
+                for h in raw_heights[:3]           # 4개 이상 수동 편집 방어
+                if isinstance(h, (int, float))     # 비숫자 항목 필터
+            ]
+        else:
+            logo_heights = []
+        # 길이 부족분은 CompanyTheme.__post_init__ 에서 logo_max_height 로 패딩됨
+
         return CompanyTheme(
             primary_hex=primary,
             logos=_LOGOS_DEFAULT,
             logo_paths=logo_paths,
+            logo_max_height=logo_max_height,
+            logo_heights=logo_heights,
         )
     except Exception:
         return GRAY_DEFAULT
@@ -90,6 +106,8 @@ def save_theme(theme: CompanyTheme) -> None:
     """
     try:
         payload: dict = {"primary_hex": theme.primary_hex}
+        payload["logo_max_height"] = theme.logo_max_height
+        payload["logo_heights"] = theme.logo_heights
         if theme.logo_paths:
             payload["logo_paths"] = [Path(p).as_posix() for p in theme.logo_paths]
         _CONFIG_PATH.write_text(

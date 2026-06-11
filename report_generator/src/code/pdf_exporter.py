@@ -88,9 +88,10 @@ _WHITE  = colors.white
 
 # ── 헤더 테이블 컬럼 너비 상수 ───────────────────────────────────────────────
 _LOGO_CELL_W       = _WIDTH * 0.25                     # 헤더 로고 셀 전체 너비
-_COLS_HEADER_LOGO  = [_WIDTH * 0.12, _WIDTH * 0.13]   # 2-로고 서브테이블: 좌 | 우
-_COLS_HEADER_LOGO_3 = [_LOGO_CELL_W / 3] * 3          # 3-로고 서브테이블: 균등 3열
-_COLS_HEADER_TITLE = [_WIDTH * 0.75, _WIDTH * 0.25]   # 헤더 테이블: 타이틀 | 로고셀
+_COLS_HEADER_LOGO  = [_WIDTH * 0.125, _WIDTH * 0.125]  # 2-로고 서브테이블: 좌 | 우 (대칭)
+_COLS_HEADER_LOGO_3 = [_WIDTH * 0.40 / 3] * 3          # 3-로고 서브테이블: 균등 3열 (슬롯당 ≈ 68pt)
+_COLS_HEADER_TITLE = [_WIDTH * 0.75, _WIDTH * 0.25]   # 헤더 테이블: 타이틀 | 로고셀 (1~2 로고)
+_COLS_HEADER_TITLE_3 = [_WIDTH * 0.60, _WIDTH * 0.40] # 헤더 테이블: 타이틀 | 로고셀 (3 로고)
 _RENDER_DPI        = 150                               # 로고 사전 리사이즈 기준 DPI
 
 # ── 섹션별 컬럼 너비 ──────────────────────────────────────────────────────────
@@ -140,12 +141,16 @@ def _setup_fonts() -> tuple[str, str]:
 # ── 공개 함수 ──────────────────────────────────────────────────────────────────
 
 def export(results: dict, pdf_path: str, code: str,
-           theme: CompanyTheme | None = None) -> bool:
+           theme: CompanyTheme | None = None, logo_max_height: int = 48,
+           logo_heights: list[int] | None = None) -> bool:
     _theme = theme or GRAY_DEFAULT
+    _lh = list(logo_heights or [])
+    _lh = (_lh + [_theme.logo_max_height] * (3 - len(_lh)))[:3]
     try:
         fn, fb = _setup_fonts()
         s = _styles(fn, fb, _theme)
-        story = _build_story(results, s, fn, fb)
+        story = _build_story(results, s, fn, fb, logo_max_height=_theme.logo_max_height,
+                             logo_heights=_lh)
         doc = SimpleDocTemplate(
             pdf_path, pagesize=_PAGE,
             leftMargin=_MARGIN, rightMargin=_MARGIN,
@@ -191,7 +196,8 @@ def _styles(fn: str, fb: str, theme: CompanyTheme) -> dict:
 
 # ── 스토리 빌드 ────────────────────────────────────────────────────────────────
 
-def _build_story(results: dict, s: dict, fn: str, fb: str) -> list:
+def _build_story(results: dict, s: dict, fn: str, fb: str, logo_max_height: int = 48,
+                 logo_heights: list[int] | None = None) -> list:
     ai   = results.get('account_info', {})
     d주관 = results['dept_주관']
     d사용 = results['dept_사용']
@@ -202,7 +208,7 @@ def _build_story(results: dict, s: dict, fn: str, fb: str) -> list:
     gap = Spacer(1, 4)
     story: list = []
     story.append(_tbl_header_bar(s))
-    story.append(_tbl_header(s));                    story.append(gap)
+    story.append(_tbl_header(s, logo_max_height=logo_max_height, logo_heights=logo_heights));  story.append(gap)
     story.append(_tbl_account(ai, s));               story.append(gap)
     story.extend(_tbl_target(ai, s));                story.append(gap)
     story.extend(_tbl_dept(d주관, d사용, s, fb));    story.append(gap)
@@ -232,7 +238,7 @@ def _base_style() -> list:
 
 # ── [A][B] 최상단 헤더 배너 + 안내문 ──────────────────────────────────────────
 
-def _load_image_safe(path: str, max_height: float = 24, max_width: float = None) -> Image:
+def _load_image_safe(path: str, max_height: float = 48, max_width: float = None) -> Image:
     """투명 PNG를 흰 배경 RGB로 합성하고 LANCZOS로 사전 리사이즈하여 ReportLab Image 반환.
 
     모든 투명도 모드('P', 'LA' 등)를 RGBA로 정규화 후 합성하여 흰 줄 아티팩트를 방지한다.
@@ -266,7 +272,8 @@ def _load_image_safe(path: str, max_height: float = 24, max_width: float = None)
     return Image(buf, width=render_w, height=render_h)
 
 
-def _tbl_header(s: dict) -> Table:
+def _tbl_header(s: dict, logo_max_height: int = 48,
+                logo_heights: list[int] | None = None) -> Table:
     logo_imgs = []
 
     # Phase A — 유효 경로 수집 (is_file 검사 통과한 것만)
@@ -278,7 +285,7 @@ def _tbl_header(s: dict) -> Table:
 
     # Phase B — 슬롯별 가용 너비 결정 (예상 로고 수 기준)
     if n_expected >= 3:
-        slot_widths = [_LOGO_CELL_W / 3] * 3          # ≈ 63.07pt × 3
+        slot_widths = list(_COLS_HEADER_LOGO_3)         # ≈ 68pt × 3
     elif n_expected == 2:
         slot_widths = list(_COLS_HEADER_LOGO)          # [90.82pt, 98.39pt]
     elif n_expected == 1:
@@ -286,12 +293,18 @@ def _tbl_header(s: dict) -> Table:
     else:
         slot_widths = []
 
-    # Phase C — 슬롯 너비를 max_width로 전달하여 fit-within 로딩
-    for user_path, cell_w in zip(valid_paths, slot_widths):
+    # Phase C — 슬롯별 높이를 적용하여 fit-within 로딩
+    # export()에서 길이 3으로 정규화된 값이 내려오므로 단순 슬라이싱으로 충분
+    per_slot_heights = (logo_heights or [logo_max_height] * 3)[:n_expected]
+
+    rendered = []
+    for user_path, cell_w, slot_h in zip(valid_paths, slot_widths, per_slot_heights):
         try:
-            logo_imgs.append(_load_image_safe(user_path, max_height=24, max_width=cell_w))
+            rendered.append(_load_image_safe(user_path, max_height=slot_h, max_width=cell_w))
         except Exception:
-            pass  # 개별 로딩 실패는 건너뛰고 나머지로 계속
+            rendered.append(None)
+
+    logo_imgs = [im for im in rendered if im is not None]
 
     # Fallback: 사용자 로고가 하나도 없을 때만 기본 로고 목록 사용
     if not logo_imgs:
@@ -327,12 +340,14 @@ def _tbl_header(s: dict) -> Table:
         ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
     ])
     n = len(logo_imgs)
+    valid_heights = [im.drawHeight for im in logo_imgs if im is not None]
+    common_h = max(valid_heights) if valid_heights else logo_max_height
     if n >= 3:
-        lt = Table([logo_imgs[:3]], colWidths=_COLS_HEADER_LOGO_3)
+        lt = Table([logo_imgs[:3]], colWidths=_COLS_HEADER_LOGO_3, rowHeights=[common_h])
         lt.setStyle(_logo_tbl_style)
         logo_cell = lt
     elif n == 2:
-        lt = Table([[logo_imgs[0], logo_imgs[1]]], colWidths=_COLS_HEADER_LOGO)
+        lt = Table([[logo_imgs[0], logo_imgs[1]]], colWidths=_COLS_HEADER_LOGO, rowHeights=[common_h])
         lt.setStyle(_logo_tbl_style)
         logo_cell = lt
     elif n == 1:
@@ -343,7 +358,8 @@ def _tbl_header(s: dict) -> Table:
     data = [
         [_P('[ 사업비 전표 분석 ]', s['title_w']), logo_cell],
     ]
-    t = Table(data, colWidths=_COLS_HEADER_TITLE)
+    _h_col_w = _COLS_HEADER_TITLE_3 if n_expected >= 3 else _COLS_HEADER_TITLE
+    t = Table(data, colWidths=_h_col_w)
     t.setStyle(TableStyle([
         ('BACKGROUND',    (0, 0), (0, 0), _WHITE),
         ('BACKGROUND',    (1, 0), (1, 0), _WHITE),

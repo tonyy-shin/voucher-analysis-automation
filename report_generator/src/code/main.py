@@ -59,7 +59,7 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
 
     # ── 색상 미리보기 레이블 ──────────────────────────────────────────────
     preview_frame = tk.Frame(dlg, bd=1, relief="sunken")
-    preview_frame.grid(row=0, column=0, columnspan=4, padx=12, pady=(12, 4), sticky="ew")
+    preview_frame.grid(row=0, column=0, columnspan=7, padx=12, pady=(12, 4), sticky="ew")
 
     swatch = tk.Label(preview_frame, bg=current_hex[0], width=8, height=2)
     swatch.pack(side="left", padx=4, pady=4)
@@ -80,15 +80,19 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
 
     # ── 구분선 ────────────────────────────────────────────────────────────
     tk.Frame(dlg, height=1, bg="#cccccc").grid(
-        row=2, column=0, columnspan=4, sticky="ew", padx=12, pady=(4, 0)
+        row=2, column=0, columnspan=7, sticky="ew", padx=12, pady=(4, 0)
     )
 
     # ── 로고 슬롯 (3행) ───────────────────────────────────────────────────
     tk.Label(dlg, text="회사 로고 이미지 (최대 3개):").grid(
-        row=3, column=0, columnspan=4, padx=12, pady=(8, 4), sticky="w"
+        row=3, column=0, columnspan=7, padx=12, pady=(8, 4), sticky="w"
     )
 
     slot_vars: list[tk.StringVar] = []
+    scale_vars: list[tk.DoubleVar] = []
+
+    def update_preview(*_args):  # no-op; PIL 블록에서 실제 함수로 교체됨
+        pass
 
     for i in range(3):
         tk.Label(dlg, text=f"로고 {i + 1}:", width=7, anchor="e").grid(
@@ -113,24 +117,105 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
                 if path:
                     slots[idx] = path
                     slot_vars[idx].set(_fmt_slot_label(path))
+                    update_preview()
             return _pick
 
         def _make_clear(idx: int):
             def _clear():
                 slots[idx] = None
                 slot_vars[idx].set("미지정")
+                update_preview()
             return _clear
 
         tk.Button(dlg, text="변경", width=6, command=_make_pick(i)).grid(
             row=4 + i, column=2, padx=2, pady=3
         )
         tk.Button(dlg, text="삭제", width=6, command=_make_clear(i)).grid(
-            row=4 + i, column=3, padx=(2, 12), pady=3
+            row=4 + i, column=3, padx=(2, 8), pady=3
         )
+
+        # ── 슬롯별 높이 슬라이더 (column 4~6) ───────────────────────────
+        tk.Label(dlg, text="높이:", anchor="e").grid(
+            row=4 + i, column=4, padx=(8, 2), pady=3, sticky="e"
+        )
+        sv = tk.DoubleVar(value=theme.logo_heights[i])
+        scale_vars.append(sv)
+        val_lbl = tk.Label(dlg, text=str(int(theme.logo_heights[i])), width=4, anchor="e")
+        val_lbl.grid(row=4 + i, column=6, padx=(2, 12), pady=3, sticky="e")
+
+        def _make_scale_cb(lbl):
+            def _cb(val):
+                lbl.config(text=str(int(float(val))))
+            return _cb
+
+        ttk.Scale(
+            dlg, from_=16, to=96, orient="horizontal",
+            variable=sv, command=_make_scale_cb(val_lbl),
+        ).grid(row=4 + i, column=5, padx=2, pady=3, sticky="ew")
+
+    # ── 구분선 ────────────────────────────────────────────────────────────
+    tk.Frame(dlg, height=1, bg="#cccccc").grid(
+        row=7, column=0, columnspan=7, sticky="ew", padx=12, pady=(8, 0)
+    )
+
+    # ── 로고 미리보기 캔버스 ─────────────────────────────────────────────
+    _PREV_W, _PREV_H = 560, 100
+    try:
+        from PIL import Image, ImageTk  # optional; silently skipped if absent
+
+        preview_canvas = tk.Canvas(
+            dlg, width=_PREV_W, height=_PREV_H,
+            bg="#f5f5f5", highlightthickness=1,
+            highlightbackground="#cccccc",
+        )
+        preview_canvas.grid(row=8, column=0, columnspan=7, padx=12, pady=(4, 0))
+
+        def update_preview(*_args):  # 위 no-op 재바인딩
+            preview_canvas.delete("all")
+            preview_canvas._photos = {}
+            x_offset = 4
+            for i, path in enumerate(slots):
+                if not path or not os.path.isfile(path):
+                    continue
+                logo_h_pt = int(scale_vars[i].get())
+                logo_h_px = int(logo_h_pt * 96 / 72)
+                try:
+                    img = Image.open(path)
+                    ratio = logo_h_px / img.height
+                    new_w = int(img.width * ratio)
+                    new_h = logo_h_px
+                    if new_h > _PREV_H - 8:
+                        ratio = (_PREV_H - 8) / img.height
+                        new_w = int(img.width * ratio)
+                        new_h = _PREV_H - 8
+                    if new_w > _PREV_W - x_offset - 4:
+                        ratio = (_PREV_W - x_offset - 4) / img.width
+                        new_w = _PREV_W - x_offset - 4
+                        new_h = int(img.height * ratio)
+                    img = img.resize((max(1, new_w), max(1, new_h)), Image.LANCZOS)
+                    photo = ImageTk.PhotoImage(img)
+                    preview_canvas._photos[i] = photo
+                    preview_canvas.create_image(x_offset, _PREV_H // 2, anchor="w", image=photo)
+                    x_offset += new_w + 8
+                except Exception:
+                    pass
+
+            if x_offset == 4:  # 표시된 로고 없음
+                preview_canvas.create_text(
+                    _PREV_W // 2, _PREV_H // 2,
+                    text="로고 미리보기",
+                    fill="#aaaaaa", justify="center", font=("맑은 고딕", 9),
+                )
+
+        for sv in scale_vars:
+            sv.trace_add("write", update_preview)
+        update_preview()
+    except ImportError:
+        pass
 
     # ── 버튼 행 ──────────────────────────────────────────────────────────
     btn_frame = tk.Frame(dlg)
-    btn_frame.grid(row=7, column=0, columnspan=4, pady=(8, 12), padx=12)
+    btn_frame.grid(row=9, column=0, columnspan=7, pady=(8, 12), padx=12)
 
     def _save_and_close():
         valid_paths = [p for p in slots if p]
@@ -138,6 +223,8 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
             primary_hex=current_hex[0],
             logos=theme.logos,
             logo_paths=valid_paths,
+            logo_max_height=max(int(v.get()) for v in scale_vars),
+            logo_heights=[int(v.get()) for v in scale_vars],
         )
         save_theme(new_theme)
         result[0] = new_theme
@@ -693,7 +780,7 @@ def main() -> None:
     # ── Stage 3: PDF 생성 ─────────────────────────────────────────────────
     for code_str, results in _pipeline_results.items():
         pdf_path = os.path.join(out_dir, _PDF_FILENAME_TEMPLATE.format(code_str))
-        ok = pdf_exporter.export(results, pdf_path, code_str, theme=theme)
+        ok = pdf_exporter.export(results, pdf_path, code_str, theme=theme, logo_heights=theme.logo_heights)
         if not ok:
             errors.append((code_str, "PDF 생성 실패"))
             continue
