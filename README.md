@@ -1,31 +1,36 @@
-﻿# 전표분석서 자동화
+# Expense Statement Analysis Automation
 
-Excel 원본 데이터(사업비 피벗 테이블)에서 출력전표 코드별로 **사업비 전표분석서 PDF**를 일괄 자동 생성하는 Windows 도구.
-
----
-
-## 주요 기능
-
-- **출력전표 코드 일괄 처리** — `출력>` 시트에 등록된 코드를 순회하며 코드별 PDF를 자동 생성
-- **3중 LEFT JOIN** — 실제발생사업비 ↔ 계정정보 ↔ Cost Center Master ↔ 출력> 시트
-- **컬럼·시트명 유연 대응** — `column_config.yaml`로 외부화, 불일치 감지 시 GUI 검증 창 제공
-- **PDF 테마 설정** — 포인트 색상과 로고(최대 3개)를 실행 시 선택 가능
-- **Fuzzy 매칭** — 컬럼명 버전 변경(예: `대상정의 v3.0_0415`) 시 자동 추천
+A Windows tool that auto-generates **Business Expense Statement Analysis PDFs** in bulk from Excel source data (expense pivot tables), one PDF per output code.
 
 ---
 
-## 요구 환경
+## Key Features
 
-| 항목 | 최소 버전 |
-|------|-----------|
-| Python | 3.10 이상 (권장 3.11+) |
-| OS | Windows (맑은 고딕 폰트 필요) |
-| 폰트 | `C:\Windows\Fonts\malgun.ttf` |
-| tkinter | Python 설치 시 기본 포함 |
+- **Batch processing by output code** — Iterates through codes registered in the `출력>` sheet and generates a separate PDF for each
+- **Triple LEFT JOIN** — Actual Expense ↔ Account Info ↔ Cost Center Master ↔ Output sheet
+- **Flexible column & sheet mapping** — Externalized via `column_config.yaml`; GUI correction dialog opens on any mismatch, with fuzzy-match auto-suggestions
+- **PDF theme settings** — Point color and logos (up to 3 slots) selectable at runtime with a **live preview canvas**
+- **Per-slot logo heights** — Each of the 3 logo slots has an independent height slider (16–96 pt range)
+- **Unregistered team detection** — Pre-flight check warns if transaction-sheet teams are absent from the output sheet
+- **Unclassified item warnings** — Detects and reports individual rows where amounts could not be classified, with cost center, classification value, and amount details
+- **Dynamic header row detection** — Scans the first 20 rows to locate actual column headers, tolerating variable file layouts
+- **Case-insensitive amount column mapping** — e.g., `"sum of da_p"` is automatically resolved to `"Sum of DA_P"`
+- **Fuzzy matching** — Auto-suggests correct column names when version strings change (e.g., `대상정의 v3.0_0415`)
 
 ---
 
-## 설치
+## Requirements
+
+| Item | Minimum Version |
+|------|----------------|
+| Python | 3.10+ (3.11+ recommended) |
+| OS | Windows (Malgun Gothic font required) |
+| Font | `C:\Windows\Fonts\malgun.ttf` |
+| tkinter | Bundled with Python (no separate install needed) |
+
+---
+
+## Installation
 
 ```bash
 pip install -r requirements.txt
@@ -33,109 +38,135 @@ pip install -r requirements.txt
 
 ---
 
-## 실행 (개발 환경)
+## Running (Development)
 
 ```bash
 cd report_generator/src/code
 python main.py
 ```
 
-실행 흐름:
-1. 포인트 색상 변경 여부 선택
-2. 입력 Excel 파일 선택
-3. 컬럼·시트명 검증 (불일치 시 GUI 수정 창)
-4. 결과 저장 폴더 선택
-5. 코드별 PDF 자동 생성 → 완료 요약
+Execution flow:
+1. Select point color and configure logos (up to 3 slots) with live preview
+2. Select the input Excel file
+3. Pre-flight validation — unregistered team check, schema mismatch detection
+4. If mismatches exist: GUI correction dialog with fuzzy-match suggestions and three save options — **Apply once**, **Save & continue**, or **Cancel**
+5. Select the output folder
+6. Auto-generate PDFs per code → completion summary with warnings
 
 ---
 
-## EXE 빌드
+## EXE Build
 
 ```bat
 build.bat
 ```
 
-빌드 완료 후:
-- `dist/전표분석서_자동화.exe` — 실행 파일
-- `전표분석서_자동화_배포용.zip` — EXE + 설정 파일 2개를 묶은 배포용 패키지
+After the build completes:
+- `dist/전표분석서_자동화.exe` — Standalone executable
+- `전표분석서_자동화_배포용.zip` — Distribution package (EXE + 2 config files)
 
 ---
 
-## 파일 구조
+## File Structure
 
 ```
 python_data_cleaning/
 ├── report_generator/src/code/
-│   ├── main.py              # 진입점 — tkinter UI, 전체 흐름 제어
-│   ├── config_manager.py    # column_config.yaml 로드/저장/검증
-│   ├── data_loader.py       # 4개 시트 로드 + Phase 0 클렌징
-│   ├── processor.py         # 파이프라인 — 필터링/3중 JOIN/집계
-│   ├── pdf_exporter.py      # ReportLab A4 가로 PDF 생성
-│   ├── csv_exporter.py      # CSV 출력 (template.csv 기반)
-│   ├── company_theme.py     # 색상 테마 데이터클래스
-│   ├── theme_manager.py     # theme_config.json 저장·로드
-│   ├── template.csv         # CSV 출력 레이아웃 템플릿
+│   ├── main.py              # Entry point — tkinter UI, full execution flow
+│   ├── config_manager.py    # column_config.yaml load/save/validation + fuzzy matching
+│   ├── data_loader.py       # 4-sheet load + Phase 0 cleansing + unregistered team check
+│   ├── processor.py         # Pipeline — filtering / triple JOIN / aggregation / warnings
+│   ├── pdf_exporter.py      # ReportLab A4 landscape PDF with dynamic logo layouts
+│   ├── company_theme.py     # Theme dataclass (color + 3-slot logo heights)
+│   ├── theme_manager.py     # theme_config.json save/load with migration support
 │   └── templates/
-│       └── report_template.html  # 레이아웃 참조용 HTML
-├── images/                  # 기본 로고 이미지 (ABL.png, 우리금융그룹.png)
-├── manual/                  # 사용자 매뉴얼
-├── build.bat                # 빌드 실행 (더블클릭)
-├── build.ps1                # 빌드 자동화 스크립트 (PyInstaller)
-├── column_config.yaml       # 컬럼·시트명 설정 (Excel 구조 변경 시 수정)
-├── theme_config.json        # 테마 설정 (프로그램이 자동 저장)
-└── requirements.txt         # Python 의존성
+│       └── report_template.html  # Layout reference HTML
+├── images/                  # Default logo images (ABL.png, 우리금융그룹.png)
+├── manual/                  # User manual
+├── build.bat                # Build launcher (double-click)
+├── build.ps1                # Build automation script (PyInstaller)
+├── column_config.yaml       # Column & sheet name config (edit when Excel structure changes)
+├── theme_config.json        # Theme settings (auto-saved by the program)
+└── requirements.txt         # Python dependencies
 ```
 
 ---
 
-## 설정 파일
+## Configuration Files
 
 ### `column_config.yaml`
 
-Excel 파일의 시트명·컬럼명이 변경된 경우 이 파일을 수정합니다.
+Edit this file when sheet names or column names in the Excel source change.
 
 ```yaml
 sheets:
-  transaction: "실제발생사업비"   # 시트 탭 이름과 정확히 일치해야 함
+  transaction: "실제발생사업비"   # Must match the sheet tab name exactly
   account: "계정정보"
   ccm: "Cost Center Master"
   output: "출력>"
 
 columns:
-  대상정의: "대상정의 v3.0_0415"  # 버전 번호 변경 시 여기를 수정
-  cc_name: "Cost Center name"     # 대소문자 주의
-  # ... (나머지 컬럼)
+  대상정의: "대상정의 v3.0_0415"  # Update when the version string changes
+  cc_name: "Cost Center name"     # Case-sensitive
+  # ... (remaining columns)
+
+amount_cols:                       # 10 amount columns (case-insensitive matching)
+  - "Sum of DA_P"
+  - "Sum of DA_N"
+  # ...
+
+nature_cols:                       # 5 nature classification columns
+  - "계약비"
+  - "유지비"
+  # ...
 ```
 
-- 프로그램 실행 중 불일치가 감지되면 GUI 검증 창에서 수정 후 저장할 수 있습니다.
-- 파일이 없으면 자동 생성됩니다.
+- If a mismatch is detected at runtime, the GUI correction dialog allows you to fix and save immediately.
+- If the file is missing, it is auto-generated with annotated defaults on first run.
 
 ### `theme_config.json`
 
-PDF 포인트 색상과 로고 경로가 저장됩니다. 프로그램 실행 시 자동 저장되므로 직접 수정하지 않아도 됩니다.
+Stores the PDF point color, per-slot logo heights, and logo file paths. Auto-saved by the program — no manual editing required.
+
+```json
+{
+  "primary_hex": "#2C5F8A",
+  "logo_heights": [40, 36, 32],
+  "logo_paths": ["images/ABL.png", "images/우리금융그룹.png", null]
+}
+```
 
 ---
 
-## 데이터 파이프라인 개요
+## Data Pipeline
 
 ```
-Excel 입력
+Excel Input
     │
     ▼
-[data_loader] 4개 시트 로드 + Phase 0 클렌징
-    │  - 형변환 (JOIN 키 str 통일)
-    │  - 공백 제거
-    │  - 숫자 결측치 → 0
+[data_loader]  4-sheet load + Phase 0 cleansing
+    │  - Dynamic header row detection (scans first 20 rows)
+    │  - Type coercion (JOIN keys unified as str)
+    │  - Whitespace stripping on all string columns
+    │  - Numeric NaN → 0
+    │  - Case-insensitive amount column name normalization
+    │  - Unregistered team pre-flight check
     │
     ▼
-[processor] 코드별 파이프라인
-    │  Step 1. 원가요소 기준 필터링
-    │  Step 2. 3중 LEFT JOIN + 대상금액 합산
-    │  Step 3. 주관/사용부서 귀속 현황
-    │  Step 4. 직접비/공통비 분류
-    │  Step 5. 성격별 × 부점 교차 집계
-    │  Step 6. 계정 헤더 정보 추출
+[processor]  Per-code pipeline
+    │  Step 1. Filter by cost element keyword
+    │  Step 2. Triple LEFT JOIN + target amount aggregation
+    │  Step 3. Principal / user department attribution
+    │  Step 4. Direct / indirect cost classification
+    │  Step 5. Nature × department cross-tabulation
+    │  Step 6. Account header metadata extraction
+    │  Step 7. Unclassified item detection & warning generation
     │
     ▼
-[pdf_exporter] A4 가로 PDF 생성 (ReportLab)
+[pdf_exporter]  A4 landscape PDF (ReportLab)
+    │  - Dynamic logo layout (1 / 2 / 3 slot column widths)
+    │  - PNG transparency → white background conversion (Pillow)
+    │  - Per-slot logo heights from theme config
+    │  - Font fallback: Malgun Gothic → Helvetica (with warning)
+    │  - FONT_PATH environment variable override supported
 ```
