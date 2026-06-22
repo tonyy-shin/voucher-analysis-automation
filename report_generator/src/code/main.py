@@ -21,7 +21,6 @@ from data_loader import _SHEET_OUTPUT, COLUMN_MAP
 from company_theme import CompanyTheme
 from theme_manager import GRAY_DEFAULT, load_theme, save_theme
 from config_manager import (
-    CSV_LABELS,
     load_config, validate_csv_columns,
 )
 
@@ -244,13 +243,102 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
     return result[0]
 
 
+# 입력 파일 선택 다이얼로그 행 정의: (논리 키, 표시 라벨)
+_FILE_SELECT_ROWS: list[tuple[str, str]] = [
+    ("transaction", "사업비정보"),
+    ("account",     "계정정보"),
+    ("ccm",         "부서정보"),
+    ("output",      "출력"),
+]
+
+
+def _show_file_select_dialog(root: tk.Tk) -> dict | None:
+    """4개 입력 CSV 파일을 각각 선택받는 모달 다이얼로그.
+
+    Returns:
+        {"transaction":경로, "account":경로, "ccm":경로, "output":경로} — [확인] 시
+        None — [취소] 또는 X 버튼 시
+    """
+    result: list[dict | None] = [None]
+
+    dlg = tk.Toplevel(root)
+    dlg.title("입력 파일 선택")
+    dlg.resizable(False, False)
+
+    tk.Label(
+        dlg,
+        text="아래 4개 CSV 파일을 각각 선택해 주세요.",
+        font=("맑은 고딕", 10, "bold"), padx=12, pady=(12, 6),
+    ).grid(row=0, column=0, columnspan=3, sticky="w")
+
+    path_vars: dict[str, tk.StringVar] = {}
+
+    for i, (key, label) in enumerate(_FILE_SELECT_ROWS):
+        tk.Label(dlg, text=f"{label}:", width=10, anchor="e").grid(
+            row=1 + i, column=0, padx=(12, 4), pady=4, sticky="e"
+        )
+        var = tk.StringVar(value="")
+        path_vars[key] = var
+        tk.Entry(
+            dlg, textvariable=var, width=58, state="readonly",
+        ).grid(row=1 + i, column=1, padx=4, pady=4, sticky="ew")
+
+        def _make_pick(k: str, lbl: str):
+            def _pick():
+                path = filedialog.askopenfilename(
+                    parent=dlg,
+                    title=f"{lbl} CSV 선택",
+                    filetypes=[("CSV 파일", "*.csv"), ("모든 파일", "*.*")],
+                )
+                if path:
+                    path_vars[k].set(path)
+            return _pick
+
+        tk.Button(dlg, text="찾아보기", width=10, command=_make_pick(key, label)).grid(
+            row=1 + i, column=2, padx=(4, 12), pady=4
+        )
+
+    # ── 버튼 행 ──────────────────────────────────────────────────────────
+    btn_frame = tk.Frame(dlg)
+    btn_frame.grid(row=1 + len(_FILE_SELECT_ROWS), column=0, columnspan=3, pady=(8, 12))
+
+    def _on_confirm():
+        selected = {k: v.get().strip() for k, v in path_vars.items()}
+        if not all(selected.values()):
+            messagebox.showwarning("입력 필요", "모든 파일을 선택해주세요.", parent=dlg)
+            return
+        result[0] = selected
+        dlg.destroy()
+
+    def _on_cancel():
+        result[0] = None
+        dlg.destroy()
+
+    tk.Button(btn_frame, text="확인", width=12, command=_on_confirm).pack(side="left", padx=6)
+    tk.Button(btn_frame, text="취소", width=8, command=_on_cancel).pack(side="left", padx=6)
+
+    dlg.protocol("WM_DELETE_WINDOW", _on_cancel)
+
+    # PyInstaller 환경 포커스 보장 + 중앙 배치
+    dlg.update_idletasks()
+    _w, _h = dlg.winfo_reqwidth(), dlg.winfo_reqheight()
+    _sw, _sh = dlg.winfo_screenwidth(), dlg.winfo_screenheight()
+    dlg.geometry(f"{_w}x{_h}+{(_sw - _w) // 2}+{(_sh - _h) // 2}")
+    dlg.grab_set()
+    dlg.lift()
+    dlg.focus_force()
+
+    dlg.wait_window()
+    return result[0]
+
+
 def main() -> None:
     """
     프로그램 전체 흐름을 제어하는 메인 함수.
 
     실행 순서:
         1. tkinter root 초기화 (hide) — --noconsole 환경에서 대화상자만 표시
-        2. 입력 데이터 CSV 폴더 선택 (askdirectory) + 4개 CSV 검증
+        2. 입력 CSV 파일 4개 선택 (_show_file_select_dialog) + 파일 검증
         3. 결과 저장 폴더 선택 (askdirectory)
         4. Phase 0 클렌징 포함 데이터 로드 (data_loader.load_all_csvs)
         5. 출력전표 코드 목록 추출 (출력.csv)
@@ -275,32 +363,25 @@ def main() -> None:
     ):
         theme = _show_theme_dialog(root, theme)
 
-    # ── Step 1: 입력 데이터 CSV 폴더 선택 ─────────────────────────────────
-    input_dir = filedialog.askdirectory(
-        title="입력 데이터 CSV 폴더 선택 (사업비정보·계정정보·부서정보·출력 .csv)",
-    )
-    if not input_dir:
-        messagebox.showinfo("취소", "폴더 선택이 취소되었습니다. 프로그램을 종료합니다.")
+    # ── Step 1: 입력 CSV 파일 4개 선택 ────────────────────────────────────
+    file_paths = _show_file_select_dialog(root)
+    if file_paths is None:
+        messagebox.showinfo("취소", "파일 선택이 취소되었습니다. 프로그램을 종료합니다.")
         sys.exit(0)
 
-    # ── Step 1-B: 4개 CSV 파일 존재 + 필수 컬럼 검증 ──────────────────────
-    problems = validate_csv_columns(input_dir, config)
+    # ── Step 1-B: 선택한 파일의 존재 + 필수 컬럼 검증 ─────────────────────
+    problems = validate_csv_columns(file_paths, config)
     if problems:
         detail = "\n".join(problems)
-        expected = "\n".join(
-            f"  - {config.get('csv_files', {}).get(k, CSV_LABELS[k])}"
-            for k in ("transaction", "account", "ccm", "output")
-        )
         messagebox.showerror(
             "입력 파일 오류",
-            "선택한 폴더에서 필요한 CSV를 찾지 못했거나 필수 컬럼이 없습니다.\n\n"
-            f"{detail}\n\n"
-            f"폴더 안에 아래 4개 파일이 모두 있어야 합니다:\n{expected}",
+            "선택한 파일을 읽지 못했거나 필수 컬럼이 없습니다.\n\n"
+            f"{detail}",
         )
         sys.exit(1)
 
     # -- Step 1-C: 미등록 부서 사전 검증 (차단 또는 무시) --------------------
-    _unregistered = data_loader.check_unregistered_teams(input_dir, config)
+    _unregistered = data_loader.check_unregistered_teams(file_paths, config)
     if _unregistered:
         _dept_lines = "\n".join(f"  {chr(8226)} {t}" for t in _unregistered)
 
@@ -391,17 +472,16 @@ def main() -> None:
 
     # ── Step 3: 데이터 로드 (Phase 0 클렌징 포함) ─────────────────────────
     try:
-        sheets = data_loader.load_all_csvs(input_dir, config=config)
+        sheets = data_loader.load_all_csvs(file_paths, config=config)
     except Exception as exc:
-        _files = config.get("csv_files", {})
         _names = "·".join(
-            _files.get(k, CSV_LABELS[k]) for k in ("transaction", "account", "ccm", "output")
+            Path(file_paths[k]).name for k in ("transaction", "account", "ccm", "output")
         )
         messagebox.showerror(
             "데이터 로드 오류",
             f"입력 CSV를 읽는 중 오류가 발생했습니다.\n\n"
             f"사유: {exc}\n\n"
-            f"파일명({_names})과 컬럼 구성을 확인하세요.",
+            f"선택한 파일({_names})과 컬럼 구성을 확인하세요.",
         )
         sys.exit(1)
 

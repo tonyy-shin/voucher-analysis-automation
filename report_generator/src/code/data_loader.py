@@ -20,14 +20,6 @@ _SHEET_ACCOUNT     = "계정정보"
 _SHEET_CCM         = "부서정보"
 _SHEET_OUTPUT      = "출력"
 
-# ── 기본 CSV 파일명 (config의 csv_files로 오버라이드 가능) ────────────────────
-_DEFAULT_CSV_FILES: dict[str, str] = {
-    "transaction": "사업비정보.csv",
-    "account":     "계정정보.csv",
-    "ccm":         "부서정보.csv",
-    "output":      "출력.csv",
-}
-
 # JOIN 미매칭 시 채워지는 표시 텍스트
 FALLBACK_TEXT = "(미매칭)"
 
@@ -119,16 +111,6 @@ def _get_output_cols_needed() -> list[str]:
 #  Public API
 # ════════════════════════════════════════════════════════════════════════════
 
-def _resolve_csv_files(config: dict | None) -> dict[str, str]:
-    """config의 csv_files 설정을 기본값과 병합하여 반환한다."""
-    files = dict(_DEFAULT_CSV_FILES)
-    if config:
-        for k, v in config.get("csv_files", {}).items():
-            if k in files and v:
-                files[k] = str(v)
-    return files
-
-
 def _apply_config_overrides(config: dict | None) -> None:
     """config의 columns / nature_cols / col_team 설정을 전역 상수에 반영한다."""
     global NATURE_COLS, COL_TEAM
@@ -163,7 +145,7 @@ def _read_csv(path: Path) -> pd.DataFrame:
     return pd.read_csv(path, dtype=str, keep_default_na=True, encoding="utf-8", encoding_errors="replace")
 
 
-def check_unregistered_teams(csv_dir: str, config: dict | None = None) -> list[str]:
+def check_unregistered_teams(file_paths: dict, config: dict | None = None) -> list[str]:
     """
     실제 발생 팀 목록(Set A)과 출력.csv 등록 부서(Set B)를 비교하여
     Set A - Set B (미등록 팀)를 반환한다.
@@ -173,18 +155,17 @@ def check_unregistered_teams(csv_dir: str, config: dict | None = None) -> list[s
            등록되지 않은 코스트센터도 미등록 경고에 잡히도록 한다.
     Set B: 출력.csv의 주관부서 ∪ 사용부서.
 
-    load_all_csvs() 이전에 호출되어 PDF 생성 전 데이터 정합성을 사전 검증한다.
+    load_all_csvs() 이전에 호출되므로, 함수 진입 시 _apply_config_overrides(config)를
+    먼저 호출하여 config의 컬럼명 오버라이드(COLUMN_MAP)가 반영된 상태에서 검증한다.
 
     Args:
-        csv_dir: 4개 CSV가 들어있는 폴더 경로
-        config:  column_config.yaml 설정 (None이면 기본값 사용)
+        file_paths: {"transaction":…, "account":…, "ccm":…, "output":…} 경로 dict
+        config:     column_config.yaml 설정 (None이면 기본값 사용)
 
     Returns:
         미등록 팀 이름 목록 (정렬됨). 없으면 [].
     """
-    _apply_config_overrides(config)
-    files = _resolve_csv_files(config)
-    base = Path(csv_dir)
+    _apply_config_overrides(config)   # COLUMN_MAP 오버라이드 선반영 (load_all_csvs보다 먼저 호출됨)
 
     col_cc   = COLUMN_MAP["코스트센터"]
     col_code = COLUMN_MAP["cc_code"]
@@ -194,8 +175,8 @@ def check_unregistered_teams(csv_dir: str, config: dict | None = None) -> list[s
 
     # ── Set A: 사업비정보 코스트센터 → 부서정보 팀 매핑 ─────────────────────
     try:
-        df_tx  = _read_csv(base / files["transaction"])
-        df_ccm = _read_csv(base / files["ccm"])
+        df_tx  = _read_csv(Path(file_paths["transaction"]))
+        df_ccm = _read_csv(Path(file_paths["ccm"]))
     except Exception:
         return []
 
@@ -228,7 +209,7 @@ def check_unregistered_teams(csv_dir: str, config: dict | None = None) -> list[s
 
     # ── Set B: 출력.csv 등록 부서 합집합 ─────────────────────────────────────
     try:
-        df_out = _read_csv(base / files["output"])
+        df_out = _read_csv(Path(file_paths["output"]))
     except Exception:
         return []
 
@@ -241,7 +222,7 @@ def check_unregistered_teams(csv_dir: str, config: dict | None = None) -> list[s
     return sorted(set_a - set_b)
 
 
-def load_all_csvs(csv_dir: str, config: dict | None = None) -> dict[str, pd.DataFrame]:
+def load_all_csvs(file_paths: dict, config: dict | None = None) -> dict[str, pd.DataFrame]:
     """
     4개 CSV를 로드하고 Phase 0 클렌징까지 완료한 DataFrame dict를 반환한다.
 
@@ -249,20 +230,18 @@ def load_all_csvs(csv_dir: str, config: dict | None = None) -> dict[str, pd.Data
         "사업비정보", "계정정보", "부서정보", "출력"
 
     Args:
-        csv_dir: 4개 CSV가 들어있는 폴더 경로
-        config:  column_config.yaml 설정 (None이면 기본값 사용)
+        file_paths: {"transaction":…, "account":…, "ccm":…, "output":…} 경로 dict
+        config:     column_config.yaml 설정 (None이면 기본값 사용)
 
     Returns:
         클렌징이 완료된 DataFrame을 담은 dict
     """
     _apply_config_overrides(config)
-    files = _resolve_csv_files(config)
-    base = Path(csv_dir)
 
-    df_tx     = _read_csv(base / files["transaction"])
-    df_account = _read_csv(base / files["account"])
-    df_ccm    = _read_csv(base / files["ccm"])
-    df_output = _read_csv(base / files["output"])
+    df_tx      = _read_csv(Path(file_paths["transaction"]))
+    df_account = _read_csv(Path(file_paths["account"]))
+    df_ccm     = _read_csv(Path(file_paths["ccm"]))
+    df_output  = _read_csv(Path(file_paths["output"]))
 
     return {
         _SHEET_TRANSACTION: _preprocess_actual(df_tx),

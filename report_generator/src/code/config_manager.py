@@ -26,14 +26,8 @@ else:
 
 _CONFIG_PATH = _CONFIG_DIR / "column_config.yaml"
 
-# ── 기본 설정값 — data_loader.COLUMN_MAP + _DEFAULT_CSV_FILES 의 단일 원본 ─────
+# ── 기본 설정값 — data_loader.COLUMN_MAP 의 단일 원본 ─────────────────────────
 _DEFAULT_CONFIG: dict[str, Any] = {
-    "csv_files": {
-        "transaction": "사업비정보.csv",
-        "account":     "계정정보.csv",
-        "ccm":         "부서정보.csv",
-        "output":      "출력.csv",
-    },
     "columns": {
         # 사업비정보.csv
         "원가요소":    "원가요소",
@@ -140,29 +134,33 @@ def generate_default_config_file() -> None:
         pass
 
 
-def validate_csv_columns(csv_dir: str, config: dict[str, Any]) -> list[str]:
-    """CSV 폴더의 4개 파일 존재 여부 및 필수 컬럼 보유 여부를 검증한다.
+def validate_csv_columns(file_paths: dict, config: dict[str, Any]) -> list[str]:
+    """선택된 4개 CSV 파일의 존재 여부 및 필수 컬럼 보유 여부를 검증한다.
 
     Args:
-        csv_dir: 4개 CSV가 들어있는 폴더 경로
-        config:  load_config()의 반환값
+        file_paths: {"transaction":…, "account":…, "ccm":…, "output":…} 경로 dict
+        config:     load_config()의 반환값
 
     Returns:
         문제 메시지 리스트 (사람이 읽을 수 있는 형태). 모두 정상이면 빈 리스트.
     """
     import pandas as pd  # noqa: PLC0415
 
-    base = Path(csv_dir)
-    files_cfg = config.get("csv_files", _DEFAULT_CONFIG["csv_files"])
     cols_cfg = config.get("columns", {})
     problems: list[str] = []
 
     for csv_key, required_col_keys in _CSV_REQUIRED_COLS.items():
-        fname = files_cfg.get(csv_key, CSV_LABELS.get(csv_key, csv_key))
-        fpath = base / fname
+        label = CSV_LABELS.get(csv_key, csv_key)
+        path_str = file_paths.get(csv_key, "")
+        if not path_str:
+            problems.append(f"• {label}: 파일이 선택되지 않았습니다.")
+            continue
+
+        fpath = Path(path_str)
+        disp = fpath.name or label
 
         if not fpath.exists():
-            problems.append(f"• {fname} 파일을 찾을 수 없습니다.")
+            problems.append(f"• {label}({disp}) 파일을 찾을 수 없습니다.")
             continue
 
         try:
@@ -173,7 +171,7 @@ def validate_csv_columns(csv_dir: str, config: dict[str, Any]) -> list[str]:
                 head = pd.read_csv(fpath, dtype=str, nrows=0, encoding="cp949")
                 actual_cols = set(head.columns)
             except Exception as exc:
-                problems.append(f"• {fname} 파일을 읽을 수 없습니다: {exc}")
+                problems.append(f"• {label}({disp}) 파일을 읽을 수 없습니다: {exc}")
                 continue
 
         missing = [
@@ -183,7 +181,7 @@ def validate_csv_columns(csv_dir: str, config: dict[str, Any]) -> list[str]:
         ]
         if missing:
             problems.append(
-                f"• {fname}: 필수 컬럼 누락 → {', '.join(missing)}"
+                f"• {label}({disp}): 필수 컬럼 누락 → {', '.join(missing)}"
             )
 
     return problems
@@ -223,13 +221,6 @@ _YAML_HEADER = """\
 """
 
 _ANNOTATED_YAML_BODY = """\
-csv_files:
-  # 입력 폴더 안에 있어야 하는 4개 CSV 파일의 실제 파일명
-  transaction: "사업비정보.csv"
-  account: "계정정보.csv"
-  ccm: "부서정보.csv"
-  output: "출력.csv"
-
 columns:
   # ── 사업비정보.csv ──────────────────────────────────────────────────────
   원가요소: "원가요소"
