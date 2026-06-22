@@ -439,9 +439,12 @@ def _preprocess_output(df: pd.DataFrame) -> pd.DataFrame:
     df = cleanse_types(df, [COLUMN_MAP["출력전표"]])
     df = cleanse_whitespace(df)
 
-    # 필요 컬럼만 선택 (존재하는 것만)
-    available = [c for c in _get_output_cols_needed() if c in df.columns]
-    if available:
-        df = df[available].copy()
+    # 필요 컬럼만 선택 — 분류 근거 7컬럼(BASIS_TEXT_COLS) 명시적 보존
+    _col_code = COLUMN_MAP["출력전표"]
+    _col_주관 = COLUMN_MAP["귀속_주관부서"]
+    _col_사용 = COLUMN_MAP["귀속_사용부서"]
+    keep_cols = [c for c in [_col_code, _col_주관, _col_사용] + BASIS_TEXT_COLS if c in df.columns]
+    if keep_cols:
+        df = df[keep_cols].copy()
 
     return df

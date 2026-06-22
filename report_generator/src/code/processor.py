@@ -35,16 +35,17 @@ def build_classification_basis(output_row: pd.Series | dict | None) -> dict[str,
     Returns:
         {"직접비_근거": str, "간접비_근거": str, ..., "투자관리비_근거": str}
     """
-    basis: dict[str, str] = {}
+    _KEYS = ["직접비_근거", "간접비_근거", "공통비_근거", "계약비_근거",
+             "유지비_근거", "손해조사비_근거", "투자관리비_근거"]
     if output_row is None:
-        return {f"{col}_근거": "" for col in BASIS_TEXT_COLS}
+        return {k: "" for k in _KEYS}
 
-    for col in BASIS_TEXT_COLS:
-        val = output_row.get(col, "") if hasattr(output_row, "get") else ""
-        if val is None or (isinstance(val, float) and pd.isna(val)):
-            val = ""
-        basis[f"{col}_근거"] = str(val).strip()
-    return basis
+    _MAPPING = {
+        "직접비": "직접비_근거", "간접비": "간접비_근거", "공통비": "공통비_근거",
+        "계약비": "계약비_근거", "유지비": "유지비_근거",
+        "손해조사비": "손해조사비_근거", "투자관리비": "투자관리비_근거",
+    }
+    return {v: str(output_row.get(k, "") or "").strip() for k, v in _MAPPING.items()}
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -554,9 +555,8 @@ def run_pipeline(
     col_code = COLUMN_MAP["출력전표"]
     basis_row = None
     if not df_output.empty and col_code in df_output.columns:
-        matched = df_output[df_output[col_code].astype(str).str.strip() == str(keyword).strip()]
-        if not matched.empty:
-            basis_row = matched.iloc[0]
+        mask = df_output[col_code].astype(str).str.strip() == str(keyword).strip()
+        basis_row = df_output[mask].iloc[0] if mask.any() else None
     classification_basis = build_classification_basis(basis_row)
 
     # Step 1 — 필터링
