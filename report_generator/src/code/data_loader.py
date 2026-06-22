@@ -285,11 +285,25 @@ def cleanse_whitespace(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _to_numeric_safe(series: pd.Series) -> pd.Series:
+    """쉼표 포함 숫자, 단독 대시(-), 빈값을 모두 안전하게 숫자로 변환."""
+    return (
+        series
+        .astype(str)
+        .str.strip()
+        .str.replace(r"^\s*-\s*$", "0", regex=True)  # 단독 '-' → '0' (음수 보존)
+        .str.replace(",", "", regex=False)             # 쉼표 제거
+        .replace({"": "0", "nan": "0", "None": "0"})
+        .pipe(lambda s: pd.to_numeric(s, errors="coerce"))
+        .fillna(0)
+    )
+
+
 def cleanse_nulls(df: pd.DataFrame, numeric_cols: list[str]) -> pd.DataFrame:
     """숫자 컬럼의 NaN을 fillna(0)으로 처리한다."""
     for col in numeric_cols:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+            df[col] = _to_numeric_safe(df[col])
     return df
 
 
