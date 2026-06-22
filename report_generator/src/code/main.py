@@ -8,6 +8,7 @@ main.py
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tkinter as tk
@@ -26,6 +27,30 @@ from config_manager import (
 
 # ── 모듈 상수 ─────────────────────────────────────────────────────────────────
 _PDF_FILENAME_TEMPLATE = "사업비_전표_분석_{}.pdf"
+
+if getattr(sys, "frozen", False):
+    _PATHS_DIR = Path(sys.executable).parent
+else:
+    _PATHS_DIR = Path(__file__).parents[3]
+
+_LAST_PATHS_FILE = _PATHS_DIR / "last_paths.json"
+
+
+def _load_last_paths() -> dict:
+    try:
+        with open(_LAST_PATHS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_last_paths(paths: dict) -> None:
+    try:
+        with open(_LAST_PATHS_FILE, "w", encoding="utf-8") as f:
+            json.dump(paths, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
 
 
 def _fmt_slot_label(path: str | None) -> str:
@@ -271,13 +296,16 @@ def _show_file_select_dialog(root: tk.Tk) -> dict | None:
         font=("맑은 고딕", 10, "bold"), padx=12, pady=(12, 6),
     ).grid(row=0, column=0, columnspan=3, sticky="w")
 
+    last_paths = _load_last_paths()
     path_vars: dict[str, tk.StringVar] = {}
 
     for i, (key, label) in enumerate(_FILE_SELECT_ROWS):
         tk.Label(dlg, text=f"{label}:", width=10, anchor="e").grid(
             row=1 + i, column=0, padx=(12, 4), pady=4, sticky="e"
         )
-        var = tk.StringVar(value="")
+        saved = last_paths.get(key, "")
+        initial = saved if saved and Path(saved).is_file() else ""
+        var = tk.StringVar(value=initial)
         path_vars[key] = var
         tk.Entry(
             dlg, textvariable=var, width=58, state="readonly",
@@ -307,6 +335,7 @@ def _show_file_select_dialog(root: tk.Tk) -> dict | None:
         if not all(selected.values()):
             messagebox.showwarning("입력 필요", "모든 파일을 선택해주세요.", parent=dlg)
             return
+        _save_last_paths(selected)
         result[0] = selected
         dlg.destroy()
 
