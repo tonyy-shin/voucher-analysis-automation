@@ -554,12 +554,12 @@ def _tbl_nature_32(nat: pd.DataFrame, s: dict, fb: str) -> list:
 # ── [H] 4. 분류 근거 ───────────────────────────────────────────────────────────
 
 def _tbl_basis(cb: dict, di: dict, nat: pd.DataFrame, s: dict) -> list:
-    # 직·공통비: 출력.csv의 직접비/간접비/공통비 근거 중 텍스트가 채워진 항목만 포함
-    di_parts = [
-        cb.get(f'{k}_근거', '').strip()
-        for k in ('직접비', '간접비', '공통비')
-    ]
-    di_parts = [t for t in di_parts if t]
+    # 직·공통비: 출력.csv의 직접비/공통비 근거 중 텍스트가 채워진 항목만 "{구분}: {텍스트}" 형식으로 포함
+    di_parts = []
+    for k in ('직접비', '공통비'):
+        t = cb.get(f'{k}_근거', '').strip()
+        if t:
+            di_parts.append(f'{k}: {t}')
     직공통비_text = '<br/><br/>'.join(di_parts)
 
     # 성격별 분류: 부점 데이터 행 기준 절댓값 합이 0이 아니고 근거 텍스트가 있는 항목만 포함
@@ -574,7 +574,7 @@ def _tbl_basis(cb: dict, di: dict, nat: pd.DataFrame, s: dict) -> list:
             abs_sum = pd.to_numeric(dept_rows[col], errors='coerce').abs().sum()
             txt = cb.get(f'{col}_근거', '').strip()
             if abs_sum > 0 and txt:
-                nat_parts.append(txt)
+                nat_parts.append(f'{col}: {txt}')
     성격별_text = '<br/><br/>'.join(nat_parts)
 
     data = [
