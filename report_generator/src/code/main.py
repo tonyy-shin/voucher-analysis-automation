@@ -268,8 +268,8 @@ def _show_file_select_dialog(root: tk.Tk) -> dict | None:
     tk.Label(
         dlg,
         text="아래 4개 CSV 파일을 각각 선택해 주세요.",
-        font=("맑은 고딕", 10, "bold"), padx=12, pady=(12, 6),
-    ).grid(row=0, column=0, columnspan=3, sticky="w")
+        font=("맑은 고딕", 10, "bold"),
+    ).grid(row=0, column=0, columnspan=3, sticky="w", padx=12, pady=(12, 6))
 
     path_vars: dict[str, tk.StringVar] = {}
 
