@@ -44,7 +44,8 @@ def build_classification_basis(output_row: pd.Series | dict | None) -> dict[str,
         val = output_row.get(col, "") if hasattr(output_row, "get") else ""
         if val is None or (isinstance(val, float) and pd.isna(val)):
             val = ""
-        basis[f"{col}_근거"] = str(val).strip()
+        s = str(val).strip()
+        basis[f"{col}_근거"] = "" if s.lower() in ("nan", "none") else s
     return basis
 
 
