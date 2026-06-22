@@ -16,6 +16,7 @@ from data_loader import (
     COLUMN_MAP,
     FALLBACK_TEXT, COL_SUBTOTAL, COL_TOTAL, COL_TEAM, COL_TOTAL_AMOUNT,
     _SHEET_TRANSACTION, _SHEET_CCM, _SHEET_ACCOUNT, _SHEET_OUTPUT,
+    _to_numeric_safe,
 )
 
 
@@ -205,14 +206,14 @@ def enrich_data(
     # ── JOIN 후 숫자 결측치 처리 ──────────────────────────────────────────
     for col in NATURE_COLS + [COL_TOTAL_AMOUNT]:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+            df[col] = _to_numeric_safe(df[col])
 
     # ── 대상금액 = 사업비정보.csv의 '합계' 컬럼 ──────────────────────────
     # 이 '대상금액' 값이 calc_dept_attribution의 팀별 합산
     # (df_enriched.loc[..., "대상금액"].sum())을 거쳐 d주관/d사용['대상금액'].sum()
     # 총계까지 흘러간다. 아래 calc_dept_attribution 주석 참조.
     if COL_TOTAL_AMOUNT in df.columns:
-        df["대상금액"] = pd.to_numeric(df[COL_TOTAL_AMOUNT], errors="coerce").fillna(0)
+        df["대상금액"] = _to_numeric_safe(df[COL_TOTAL_AMOUNT])
     else:
         # 합계 컬럼이 없으면 성격 컬럼 합산으로 폴백 (방어적)
         existing_nature = [c for c in NATURE_COLS if c in df.columns]
