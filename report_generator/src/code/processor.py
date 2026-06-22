@@ -358,7 +358,7 @@ def calc_direct_indirect(df_enriched: pd.DataFrame) -> dict[str, float]:
     col = COLUMN_MAP["직간접구분"]
 
     if col not in df_enriched.columns:
-        return {"직접비": 0.0, "공통비": 0.0, "총계": 총계, "_미분류경고": None}
+        return {"직접비": 0.0, "공통비": 0.0, "총계": 총계}
 
     is_직접     = df_enriched[col].str.contains("직접", na=False)
     is_공통_only = df_enriched[col].str.contains("공통", na=False) & ~is_직접
@@ -366,26 +366,7 @@ def calc_direct_indirect(df_enriched: pd.DataFrame) -> dict[str, float]:
     직접비 = float(df_enriched.loc[is_직접,      "대상금액"].sum())
     공통비 = float(df_enriched.loc[is_공통_only, "대상금액"].sum())
 
-    미분류 = round(총계 - 직접비 - 공통비, 10)
-    if abs(미분류) > 0.01:
-        is_미분류 = ~is_직접 & ~is_공통_only
-        _원가_col = COLUMN_MAP["원가요소"]
-        미분류행 = (
-            df_enriched.loc[
-                is_미분류,
-                [c for c in [_원가_col, col, "대상금액"] if c in df_enriched.columns],
-            ]
-            .rename(columns={_원가_col: "원가요소", col: "분류값", "대상금액": "금액"})
-            .to_dict("records")
-        )
-        _경고: dict | None = {
-            "미분류금액": 미분류, "총계": 총계, "직접비": 직접비, "공통비": 공통비,
-            "미분류행": 미분류행,
-        }
-    else:
-        _경고 = None
-
-    return {"직접비": 직접비, "공통비": 공통비, "총계": 총계, "_미분류경고": _경고}
+    return {"직접비": 직접비, "공통비": 공통비, "총계": 총계}
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -589,7 +570,6 @@ def run_pipeline(
     df_주관, df_사용 = calc_dept_attribution(df_enriched, df_output)
 
     di_result   = calc_direct_indirect(df_enriched)                      # Step 4
-    _미분류경고 = di_result.pop("_미분류경고", None)
 
     # ── 정합성 검증: 부점귀속 주관 총계 + 누락 총합 ≈ 직접비+공통비 총계 ──────
     return {
@@ -599,5 +579,4 @@ def run_pipeline(
         "direct_indirect":      di_result,                               # Step 4
         "nature":               calc_nature_classification(df_enriched, df_output), # Step 5
         "classification_basis": classification_basis,                   # 출력.csv 코드별 분류 근거
-        "_미분류경고":          _미분류경고,
     }
