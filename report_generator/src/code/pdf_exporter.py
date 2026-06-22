@@ -562,19 +562,15 @@ def _tbl_basis(cb: dict, di: dict, nat: pd.DataFrame, s: dict) -> list:
     di_parts = [t for t in di_parts if t]
     직공통비_text = '<br/><br/>'.join(di_parts)
 
-    # 성격별 분류: 부점 데이터 행 기준 절댓값 합이 0이 아니고 근거 텍스트가 있는 항목만 포함
-    # 총계 Net값이 0이더라도 상계된 부점이 존재하면 분류 근거를 출력해야 하므로
-    # 총계 행이 아닌 개별 부점 행의 절댓값 합으로 실질 거래 존재 여부를 판단한다.
+    # 성격별 분류: 해당 성격 컬럼(총계 행 포함 전체)에 0이 아닌 값이 하나라도 있으면 근거 포함
     nat_parts = []
     if not nat.empty:
-        dept_rows = nat[nat[COLUMN_MAP['귀속_사용부서']] != COL_TOTAL]
         for col in NATURE_COLS:
-            if col not in dept_rows.columns:
+            if col not in nat.columns:
                 continue
-            abs_sum = pd.to_numeric(dept_rows[col], errors='coerce').abs().sum()
-            txt = cb.get(f'{col}_근거', '').strip()
-            if abs_sum > 0 and txt:
-                nat_parts.append(txt)
+            col_values = pd.to_numeric(nat[col], errors='coerce').fillna(0)
+            if not (col_values == 0).all():
+                nat_parts.append(cb.get(f'{col}_근거', ''))
     성격별_text = '<br/><br/>'.join(nat_parts)
 
     data = [
