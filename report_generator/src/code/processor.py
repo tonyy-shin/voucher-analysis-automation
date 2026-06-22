@@ -40,12 +40,12 @@ def build_classification_basis(output_row: pd.Series | dict | None) -> dict[str,
     if output_row is None:
         return {k: "" for k in _KEYS}
 
-    _MAPPING = {
-        "직접비": "직접비_근거", "간접비": "간접비_근거", "공통비": "공통비_근거",
-        "계약비": "계약비_근거", "유지비": "유지비_근거",
-        "손해조사비": "손해조사비_근거", "투자관리비": "투자관리비_근거",
-    }
-    return {v: str(output_row.get(k, "") or "").strip() for k, v in _MAPPING.items()}
+    for col in BASIS_TEXT_COLS:
+        val = output_row.get(col, "") if hasattr(output_row, "get") else ""
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            val = ""
+        basis[f"{col}_근거"] = str(val).strip()
+    return basis
 
 
 # ════════════════════════════════════════════════════════════════════════════
