@@ -40,6 +40,7 @@ def build_classification_basis(output_row: pd.Series | dict | None) -> dict[str,
     if output_row is None:
         return {k: "" for k in _KEYS}
 
+    basis: dict[str, str] = {}
     for col in BASIS_TEXT_COLS:
         val = output_row.get(col, "") if hasattr(output_row, "get") else ""
         if val is None or (isinstance(val, float) and pd.isna(val)):

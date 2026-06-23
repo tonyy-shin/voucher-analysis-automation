@@ -562,9 +562,12 @@ def _tbl_basis(cb: dict, di: dict, nat: pd.DataFrame, s: dict) -> list:
             di_parts.append(f'{k}: {t}')
     직공통비_text = '<br/><br/>'.join(di_parts)
 
-    # 성격별 분류: 해당 성격 컬럼(총계 행 포함 전체)에 0이 아닌 값이 하나라도 있으면 근거 포함
+    # 성격별 분류: 부점 데이터 행(총계 행 제외) 기준 절댓값 합이 0이 아니고
+    # 근거 텍스트가 있는 항목만 "{성격}: {텍스트}" 형식으로 포함.
+    # 총계 Net값이 0이더라도 상계된 부점이 존재하면 근거를 출력해야 하므로 절댓값 합으로 판단한다.
     nat_parts = []
     if not nat.empty:
+        dept_rows = nat[nat[COLUMN_MAP['귀속_사용부서']] != COL_TOTAL]
         for col in NATURE_COLS:
             if col not in nat.columns:
                 continue
