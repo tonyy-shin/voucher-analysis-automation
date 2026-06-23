@@ -20,33 +20,37 @@ from data_loader import (
 )
 
 
-# ── 분류 근거 텍스트 — 출력.csv 코드별 행에서 생성 ────────────────────────────
-def build_classification_basis(output_row: pd.Series | dict | None) -> dict[str, str]:
+# ── 분류 근거 텍스트 — 출력.csv 전체에서 컬럼별 첫 non-empty 행으로 생성 ──────
+def build_classification_basis(df_output: pd.DataFrame | None) -> dict[str, str]:
     """
-    출력.csv의 단일 출력전표 행(BASIS_TEXT_COLS)을 분류 근거 dict로 변환한다.
+    출력.csv(df_output) 전체에서 BASIS_TEXT_COLS 컬럼별 분류 근거 dict를 생성한다.
 
-    출력.csv 컬럼(직접비/간접비/공통비/계약비/유지비/손해조사비/투자관리비)의
-    텍스트 값을 "{컬럼}_근거" 키로 매핑한다. pdf_exporter._tbl_basis가
-    직•공통비 행과 성격별 분류 행에서 이 키들을 참조한다.
+    분류 근거 텍스트는 출력전표 코드별로 존재하지 않고, 컬럼당 파일 전체에서
+    텍스트가 채워진 첫 번째 행에만 들어있다. 따라서 특정 코드 행이 아니라
+    df_output 전체를 컬럼별로 훑어 non-empty(NaN/""/nan/none/None 제외) 첫 값을
+    "{컬럼}_근거" 키로 매핑한다. pdf_exporter._tbl_basis가 직•공통비 행과
+    성격별 분류 행에서 이 키들을 참조한다.
 
     Args:
-        output_row: 해당 출력전표 코드의 출력.csv 행 (없으면 빈 dict 반환)
+        df_output: 출력.csv 전체 DataFrame (없거나 비어 있으면 빈 dict 반환)
 
     Returns:
         {"직접비_근거": str, "간접비_근거": str, ..., "투자관리비_근거": str}
     """
     _KEYS = ["직접비_근거", "간접비_근거", "공통비_근거", "계약비_근거",
              "유지비_근거", "손해조사비_근거", "투자관리비_근거"]
-    if output_row is None:
+    if df_output is None or df_output.empty:
         return {k: "" for k in _KEYS}
 
-    basis: dict[str, str] = {}
+    basis = {}
     for col in BASIS_TEXT_COLS:
-        val = output_row.get(col, "") if hasattr(output_row, "get") else ""
-        if val is None or (isinstance(val, float) and pd.isna(val)):
-            val = ""
-        s = str(val).strip()
-        basis[f"{col}_근거"] = "" if s.lower() in ("nan", "none") else s
+        val = ""
+        if col in df_output.columns:
+            series = df_output[col].dropna().astype(str).str.strip()
+            series = series[~series.isin(["", "nan", "none", "None"])]
+            if not series.empty:
+                val = series.iloc[0]
+        basis[f"{col}_근거"] = val
     return basis
 
 
@@ -553,13 +557,8 @@ def run_pipeline(
     df_account = sheets[_SHEET_ACCOUNT]
     df_output  = sheets.get(_SHEET_OUTPUT, pd.DataFrame())
 
-    # ── 분류 근거: 해당 출력전표 코드의 출력.csv 행에서 텍스트 추출 ──────────
-    col_code = COLUMN_MAP["출력전표"]
-    basis_row = None
-    if not df_output.empty and col_code in df_output.columns:
-        mask = df_output[col_code].astype(str).str.strip() == str(keyword).strip()
-        basis_row = df_output[mask].iloc[0] if mask.any() else None
-    classification_basis = build_classification_basis(basis_row)
+    # ── 분류 근거: 출력.csv 전체에서 컬럼별 첫 non-empty 텍스트 추출 ──────────
+    classification_basis = build_classification_basis(df_output)
 
     # Step 1 — 필터링
     df_filtered = filter_by_keyword(df_actual, keyword)
