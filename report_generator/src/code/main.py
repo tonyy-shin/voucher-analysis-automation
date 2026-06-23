@@ -8,7 +8,6 @@ main.py
 """
 from __future__ import annotations
 
-import copy
 import os
 import sys
 import tkinter as tk
@@ -22,8 +21,8 @@ from data_loader import _SHEET_OUTPUT, COLUMN_MAP
 from company_theme import CompanyTheme
 from theme_manager import GRAY_DEFAULT, load_theme, save_theme
 from config_manager import (
-    ColWarning, Mismatch, SHEET_LABELS,
-    load_config, save_config, validate_against_excel, validate_optional_cols,
+    CSV_LABELS,
+    load_config, validate_csv_columns,
 )
 
 # ── 모듈 상수 ─────────────────────────────────────────────────────────────────
@@ -245,229 +244,16 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
     return result[0]
 
 
-
-def _show_validation_dialog(
-    root: tk.Tk,
-    mismatches: list,
-    config: dict,
-) -> dict | None:
-    """
-    Excel 파일과 설정 파일 간 불일치를 표시하고 사용자 수정을 요청하는 팝업.
-
-    Returns:
-        dict  — [이번만 적용] 또는 [설정 저장 후 계속] 선택 시 수정된 config
-        None  — [취소] 또는 X 버튼 클릭 시
-    """
-    result: list[dict | None] = [None]
-
-    dlg = tk.Toplevel(root)
-    dlg.title("컬럼·시트명 검증")
-    dlg.geometry("820x520")
-    dlg.resizable(True, True)
-
-    # ── 경고 헤더 ──────────────────────────────────────────────────────────
-    hdr_frame = tk.Frame(dlg, bg="#FFF3CD", pady=8)
-    hdr_frame.pack(fill="x")
-    tk.Label(
-        hdr_frame,
-        text="⚠️  설정 파일과 Excel 파일의 이름이 일치하지 않습니다",
-        bg="#FFF3CD", font=("맑은 고딕", 10, "bold"), fg="#856404",
-    ).pack(side="left", padx=12)
-    tk.Label(
-        hdr_frame,
-        text="  아래 목록에서 올바른 항목을 선택해 주세요.",
-        bg="#FFF3CD", font=("맑은 고딕", 9), fg="#856404",
-    ).pack(side="left")
-
-    # ── 스크롤 영역 ────────────────────────────────────────────────────────
-    scroll_frame = tk.Frame(dlg)
-    scroll_frame.pack(fill="both", expand=True, padx=8, pady=4)
-
-    canvas = tk.Canvas(scroll_frame, highlightthickness=0)
-    vsb = tk.Scrollbar(scroll_frame, orient="vertical", command=canvas.yview)
-    canvas.configure(yscrollcommand=vsb.set)
-    vsb.pack(side="right", fill="y")
-    canvas.pack(side="left", fill="both", expand=True)
-
-    inner = tk.Frame(canvas)
-    inner_id = canvas.create_window((0, 0), window=inner, anchor="nw")
-
-    def _on_inner_configure(event):
-        canvas.configure(scrollregion=canvas.bbox("all"))
-
-    def _on_canvas_configure(event):
-        canvas.itemconfig(inner_id, width=event.width)
-
-    inner.bind("<Configure>", _on_inner_configure)
-    canvas.bind("<Configure>", _on_canvas_configure)
-    def _on_canvas_mousewheel(e):
-        if e.widget.winfo_class() in ('Listbox', 'TCombobox'):
-            return  # 드롭다운 스크롤은 위젯이 직접 처리하도록 전파 차단
-        canvas.yview_scroll(int(-1 * e.delta / 120), "units")
-    canvas.bind_all("<MouseWheel>", _on_canvas_mousewheel)
-
-    # ── 테이블 헤더 ────────────────────────────────────────────────────────
-    hdr_style = {"bg": "#4A5568", "fg": "white", "font": ("맑은 고딕", 9, "bold"), "padx": 6, "pady": 4}
-    for col_i, (txt, w) in enumerate([
-        ("용도 / 논리명", 22), ("설정 파일 현재 값", 26), ("Excel에서 선택", 30), ("상태", 10)
-    ]):
-        tk.Label(inner, text=txt, width=w, anchor="w", **hdr_style).grid(
-            row=0, column=col_i, sticky="ew", padx=1, pady=1
-        )
-
-    # ── 행 생성 ───────────────────────────────────────────────────────────
-    combo_vars: list[tuple] = []  # (Mismatch, StringVar, Label)
-    row_idx = 1
-
-    sheet_mm = [m for m in mismatches if m.is_sheet_mismatch]
-    col_mm   = [m for m in mismatches if not m.is_sheet_mismatch]
-
-    def _section_header(text: str, r: int) -> int:
-        tk.Label(inner, text=text, anchor="w", font=("맑은 고딕", 9, "bold"),
-                 bg="#EDF2F7", fg="#2D3748", pady=3, padx=8
-                 ).grid(row=r, column=0, columnspan=4, sticky="ew", pady=(6, 2))
-        return r + 1
-
-    def _add_row(m, r: int) -> int:
-        tk.Label(inner, text=m.display_label, width=22, anchor="w",
-                 font=("맑은 고딕", 9), padx=6, pady=3
-                 ).grid(row=r, column=0, sticky="ew", padx=1)
-        tk.Label(inner, text=m.expected, width=26, anchor="w",
-                 font=("맑은 고딕", 9), fg="#C53030", padx=6
-                 ).grid(row=r, column=1, sticky="ew", padx=1)
-
-        var = tk.StringVar(value=m.fuzzy_guess or "")
-        cb = ttk.Combobox(inner, textvariable=var, values=m.actual_cols, width=28, state="normal")
-        cb.grid(row=r, column=2, sticky="ew", padx=4, pady=2)
-
-        has_guess = bool(m.fuzzy_guess)
-        status_lbl = tk.Label(
-            inner,
-            text="✅ 추천됨" if has_guess else "⚠️ 미선택",
-            width=10, anchor="w", font=("맑은 고딕", 9),
-            fg="#276749" if has_guess else "#C05621",
-        )
-        status_lbl.grid(row=r, column=3, sticky="ew", padx=4)
-        combo_vars.append((m, var, status_lbl))
-        return r + 1
-
-    if sheet_mm:
-        row_idx = _section_header("📋 시트명 불일치", row_idx)
-        for m in sheet_mm:
-            row_idx = _add_row(m, row_idx)
-
-    if col_mm:
-        row_idx = _section_header("📊 컬럼명 불일치", row_idx)
-        current_key = None
-        for m in col_mm:
-            if m.sheet_key != current_key:
-                current_key = m.sheet_key
-                tk.Label(
-                    inner,
-                    text=f"  ▸ {SHEET_LABELS.get(m.sheet_key, m.sheet_key)} 시트",
-                    anchor="w", font=("맑은 고딕", 9, "italic"),
-                    bg="#F7FAFC", fg="#4A5568", pady=2, padx=12,
-                ).grid(row=row_idx, column=0, columnspan=4, sticky="ew", pady=(4, 1))
-                row_idx += 1
-            row_idx = _add_row(m, row_idx)
-
-    # ── 버튼 영역 ──────────────────────────────────────────────────────────
-    btn_frame = tk.Frame(dlg)
-    btn_frame.pack(fill="x", padx=8, pady=(4, 8))
-
-    btn_auto   = tk.Button(btn_frame, text="자동 매칭 시도",   width=14)
-    btn_apply  = tk.Button(btn_frame, text="이번만 적용",      width=14, state="disabled")
-    btn_save   = tk.Button(btn_frame, text="설정 저장 후 계속", width=16, state="disabled")
-    btn_cancel = tk.Button(btn_frame, text="취소",             width=8)
-
-    btn_auto.pack(side="left", padx=4)
-    btn_apply.pack(side="left", padx=4)
-    btn_save.pack(side="left", padx=4)
-    btn_cancel.pack(side="right", padx=4)
-
-    def _check_buttons(*_):
-        all_filled = all(v.get().strip() for _, v, _ in combo_vars)
-        state = "normal" if all_filled else "disabled"
-        btn_apply.config(state=state)
-        btn_save.config(state=state)
-
-    def _build_config() -> dict:
-        updated = copy.deepcopy(config)
-        for m, var, _ in combo_vars:
-            chosen = var.get().strip()
-            if not chosen:
-                continue
-            if m.is_sheet_mismatch:
-                updated["sheets"][m.sheet_key] = chosen
-            else:
-                updated["columns"][m.logical_name] = chosen
-        return updated
-
-    def _auto_match():
-        for m, var, lbl in combo_vars:
-            if not var.get().strip() and m.fuzzy_guess:
-                var.set(m.fuzzy_guess)
-                lbl.config(text="✅ 자동선택", fg="#276749")
-        _check_buttons()
-
-    def _apply_only():
-        result[0] = _build_config()
-        dlg.destroy()
-
-    def _save_and_continue():
-        updated = _build_config()
-        if not save_config(updated):
-            messagebox.showwarning(
-                "설정 저장 실패",
-                "설정 파일 저장에 실패했습니다 (쓰기 권한 부족 또는 디스크 오류).\n\n"
-                "이번 실행에는 수정된 설정이 적용되지만 다음 실행부터는 반영되지 않습니다.",
-            )
-        result[0] = updated
-        dlg.destroy()
-
-    def _cancel():
-        result[0] = None
-        dlg.destroy()
-
-    # 콤보박스 변경 시 버튼 상태·레이블 갱신
-    for m, var, lbl in combo_vars:
-        def _make_trace(v, l):
-            def _trace(*_):
-                filled = bool(v.get().strip())
-                l.config(text="✅ 선택됨" if filled else "⚠️ 미선택",
-                         fg="#276749" if filled else "#C05621")
-                _check_buttons()
-            return _trace
-        var.trace_add("write", _make_trace(var, lbl))
-
-    btn_auto.config(command=_auto_match)
-    btn_apply.config(command=_apply_only)
-    btn_save.config(command=_save_and_continue)
-    btn_cancel.config(command=_cancel)
-    dlg.protocol("WM_DELETE_WINDOW", _cancel)
-
-    _check_buttons()
-
-    # PyInstaller 환경 포커스 보장
-    dlg.update_idletasks()
-    dlg.grab_set()
-    dlg.lift()
-    dlg.focus_force()
-
-    dlg.wait_window()
-    canvas.unbind_all("<MouseWheel>")
-    return result[0]
-
 def main() -> None:
     """
     프로그램 전체 흐름을 제어하는 메인 함수.
 
     실행 순서:
         1. tkinter root 초기화 (hide) — --noconsole 환경에서 대화상자만 표시
-        2. 입력 데이터 파일 선택 (filedialog)
+        2. 입력 데이터 CSV 폴더 선택 (askdirectory) + 4개 CSV 검증
         3. 결과 저장 폴더 선택 (askdirectory)
-        4. Phase 0 클렌징 포함 데이터 로드 (data_loader)
-        5. 출력전표 코드 목록 추출 (출력> 시트)
+        4. Phase 0 클렌징 포함 데이터 로드 (data_loader.load_all_csvs)
+        5. 출력전표 코드 목록 추출 (출력.csv)
         6. 코드별 파이프라인 루프 (processor → pdf_exporter)
         7. 완료 요약 메시지
     """
@@ -489,41 +275,32 @@ def main() -> None:
     ):
         theme = _show_theme_dialog(root, theme)
 
-    # ── Step 1: 입력 데이터 파일 선택 ─────────────────────────────────────
-    input_path = filedialog.askopenfilename(
-        title="입력 데이터 파일 선택",
-        filetypes=[("모든 파일", "*.*"), ("Excel 파일", "*.xlsx *.xlsm *.xls")],
+    # ── Step 1: 입력 데이터 CSV 폴더 선택 ─────────────────────────────────
+    input_dir = filedialog.askdirectory(
+        title="입력 데이터 CSV 폴더 선택 (사업비정보·계정정보·부서정보·출력 .csv)",
     )
-    if not input_path:
-        messagebox.showinfo("취소", "파일 선택이 취소되었습니다. 프로그램을 종료합니다.")
+    if not input_dir:
+        messagebox.showinfo("취소", "폴더 선택이 취소되었습니다. 프로그램을 종료합니다.")
         sys.exit(0)
 
-    # ── Step 1-B: 설정 사전 검증 ─────────────────────────────────────────
-    mismatches = validate_against_excel(input_path, config)
-    if mismatches:
-        config = _show_validation_dialog(root, mismatches, config)
-        if config is None:
-            sys.exit(0)
-
-    # ── Step 1-C: 선택적 컬럼 경고 (비차단) ──────────────────────────────
-    col_warnings = validate_optional_cols(input_path, config)
-    if col_warnings:
-        detail_lines = []
-        for w in col_warnings:
-            missing_str = "\n    ".join(w.missing_cols)
-            detail_lines.append(f"• {w.display_label}:\n    {missing_str}")
-        detail = "\n\n".join(detail_lines)
-        proceed = messagebox.askyesno(
-            "선택적 컬럼 누락 경고",
-            f"일부 컬럼을 찾을 수 없습니다:\n\n{detail}\n\n"
-            "해당 컬럼이 완전히 누락된 경우 해당 출력전표 처리가 실패할 수 있습니다.\n"
-            "계속 진행하시겠습니까?",
+    # ── Step 1-B: 4개 CSV 파일 존재 + 필수 컬럼 검증 ──────────────────────
+    problems = validate_csv_columns(input_dir, config)
+    if problems:
+        detail = "\n".join(problems)
+        expected = "\n".join(
+            f"  - {config.get('csv_files', {}).get(k, CSV_LABELS[k])}"
+            for k in ("transaction", "account", "ccm", "output")
         )
-        if not proceed:
-            sys.exit(0)
+        messagebox.showerror(
+            "입력 파일 오류",
+            "선택한 폴더에서 필요한 CSV를 찾지 못했거나 필수 컬럼이 없습니다.\n\n"
+            f"{detail}\n\n"
+            f"폴더 안에 아래 4개 파일이 모두 있어야 합니다:\n{expected}",
+        )
+        sys.exit(1)
 
-    # -- Step 1-D: 미등록 부서 사전 검증 (차단 또는 무시) --------------------
-    _unregistered = data_loader.check_unregistered_teams(input_path, config)
+    # -- Step 1-C: 미등록 부서 사전 검증 (차단 또는 무시) --------------------
+    _unregistered = data_loader.check_unregistered_teams(input_dir, config)
     if _unregistered:
         _dept_lines = "\n".join(f"  {chr(8226)} {t}" for t in _unregistered)
 
@@ -541,7 +318,7 @@ def main() -> None:
 
             # 상단 안내 문구
             _msg = (
-                "실제 발생 내역에 존재하지만 '출력>' 시트에 등록되지 않은 부서가 발견되었습니다.\n"
+                "실제 발생 내역에 존재하지만 '출력.csv'에 등록되지 않은 부서가 발견되었습니다.\n"
                 "이대로 진행하면 해당 부서의 실적은 집계에서 누락됩니다."
             )
             tk.Label(
@@ -614,18 +391,21 @@ def main() -> None:
 
     # ── Step 3: 데이터 로드 (Phase 0 클렌징 포함) ─────────────────────────
     try:
-        sheets = data_loader.load_all_sheets(input_path, config=config)
+        sheets = data_loader.load_all_csvs(input_dir, config=config)
     except Exception as exc:
+        _files = config.get("csv_files", {})
+        _names = "·".join(
+            _files.get(k, CSV_LABELS[k]) for k in ("transaction", "account", "ccm", "output")
+        )
         messagebox.showerror(
             "데이터 로드 오류",
-            f"입력 파일을 읽는 중 오류가 발생했습니다.\n\n"
+            f"입력 CSV를 읽는 중 오류가 발생했습니다.\n\n"
             f"사유: {exc}\n\n"
-            f"시트명({config['sheets']['transaction']}·{config['sheets']['account']}·{config['sheets']['ccm']}·{config['sheets']['output']})과 "
-            "파일 형식을 확인하세요.",
+            f"파일명({_names})과 컬럼 구성을 확인하세요.",
         )
         sys.exit(1)
 
-    # ── Step 5: 출력전표 코드 목록 수집 (출력> 시트의 출력전표 컬럼에서) ──────────
+    # ── Step 5: 출력전표 코드 목록 수집 (출력.csv의 출력전표 컬럼에서) ──────────
     col_output_code = COLUMN_MAP["출력전표"]
     df_output = sheets[_SHEET_OUTPUT]
     codes = (
@@ -636,7 +416,7 @@ def main() -> None:
     if not codes:
         messagebox.showerror(
             "데이터 오류",
-            f"'{_SHEET_OUTPUT}' 시트의 '{col_output_code}' 컬럼에 처리할 출력전표 코드가 없습니다.",
+            f"'출력.csv'의 '{col_output_code}' 컬럼에 처리할 출력전표 코드가 없습니다.",
         )
         sys.exit(1)
 

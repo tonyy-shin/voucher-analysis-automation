@@ -12,56 +12,38 @@ import pandas as pd
 
 # data_loader에 정의된 컬럼 상수를 재사용 (중복 정의 방지)
 from data_loader import (
-    AMOUNT_COLS, NATURE_COLS,
+    NATURE_COLS, BASIS_TEXT_COLS,
     COLUMN_MAP,
-    FALLBACK_TEXT, COL_SUBTOTAL, COL_TOTAL, COL_TEAM,
+    FALLBACK_TEXT, COL_SUBTOTAL, COL_TOTAL, COL_TEAM, COL_TOTAL_AMOUNT,
     _SHEET_TRANSACTION, _SHEET_CCM, _SHEET_ACCOUNT, _SHEET_OUTPUT,
 )
 
-# ── 분류 근거 텍스트 ──────────────────────────────────────────────────────────
-# NATURE_COLS 항목 추가 시 _NATURE_BASIS_TEXTS에만 텍스트를 추가하면 자동 반영됨
-_DI_BASIS: dict[str, str] = {
-    "직접비_근거": (
-        "직접비: 해당 비용은 특정 업무 활동 또는 보험계약 단계와 직접적으로 대응되며, "
-        "다른 비용과 객관적으로 구분하여 산출이 가능함."
-    ),
-    "공통비_근거": (
-        "공통비: 다수의 업무 또는 계약 단계에 공통적으로 기여하는 성격을 가지며, "
-        "별도의 합리적인 기준에 따라."
-    ),
-}
 
-# 성격별 근거 텍스트 — NATURE_COLS 항목별 1:1 매핑
-# 새 성격 컬럼 추가 시 여기에만 항목을 추가하면 CLASSIFICATION_BASIS에 자동 반영
-_NATURE_BASIS_TEXTS: dict[str, str] = {
-    "계약비": (
-        "계약비: 해당 비용은 비용의 성격과 부서의 성격을 고려하여, 보험계약의 체결을 목적으로 "
-        "수행되는 업무에서 발생하였으며, 계약 모집, 인수 심사, 승인 또는 체결 지원 등 "
-        "계약 성립 단계의 활동과 직접적으로 연계됨."
-    ),
-    "유지비": (
-        "유지비: 해당 비용은 비용의 성격과 부서의 성격을 고려하여, 이미 체결된 보험계약의 "
-        "유지·관리·변경 또는 보전을 위한 업무 수행 과정에서 발생함."
-    ),
-    "손해조사비": (
-        "손해조사비: 해당 비용은 비용의 성격과 부서의 성격을 고려하여, 보험사고 발생 이후 "
-        "보험금 지급 여부 및 지급금액의 적정성을 판단하기 위한 업무에서 발생함."
-    ),
-    "투자관리비": (
-        "투자관리비: 해당 비용은 비용의 성격과 부서의 성격을 고려하여, "
-        "자산 운용 및 투자 활동과 관련된 업무."
-    ),
-    "기타사업비": (
-        "기타사업비: 해당 비용은 위 분류 항목에 해당하지 않는 사업비로, "
-        "업무 수행 과정에서 발생한 기타 부대비용에 해당함."
-    ),
-}
+# ── 분류 근거 텍스트 — 출력.csv 코드별 행에서 생성 ────────────────────────────
+def build_classification_basis(output_row: pd.Series | dict | None) -> dict[str, str]:
+    """
+    출력.csv의 단일 출력전표 행(BASIS_TEXT_COLS)을 분류 근거 dict로 변환한다.
 
-# NATURE_COLS 기반 자동 생성 — 키 패턴: "{col}_근거"
-CLASSIFICATION_BASIS: dict[str, str] = {
-    **_DI_BASIS,
-    **{f"{col}_근거": _NATURE_BASIS_TEXTS.get(col, "") for col in NATURE_COLS},
-}
+    출력.csv 컬럼(직접비/간접비/공통비/계약비/유지비/손해조사비/투자관리비)의
+    텍스트 값을 "{컬럼}_근거" 키로 매핑한다. pdf_exporter._tbl_basis가
+    직•공통비 행과 성격별 분류 행에서 이 키들을 참조한다.
+
+    Args:
+        output_row: 해당 출력전표 코드의 출력.csv 행 (없으면 빈 dict 반환)
+
+    Returns:
+        {"직접비_근거": str, "간접비_근거": str, ..., "투자관리비_근거": str}
+    """
+    basis: dict[str, str] = {}
+    if output_row is None:
+        return {f"{col}_근거": "" for col in BASIS_TEXT_COLS}
+
+    for col in BASIS_TEXT_COLS:
+        val = output_row.get(col, "") if hasattr(output_row, "get") else ""
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            val = ""
+        basis[f"{col}_근거"] = str(val).strip()
+    return basis
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -129,14 +111,14 @@ def enrich_data(
     3중 LEFT JOIN으로 트랜잭션 데이터에 마스터 정보를 결합하고 대상금액을 계산한다.
 
     JOIN 순서:
-        JOIN 1: (코스트 센터) ↔ (Cost Center Code) → '변경: 직간접구분' 추가
-        JOIN 2: (원가요소)    ↔ (계정번호)          → 계정명·사용부서·비용 지급 범위·산출기준 추가
+        JOIN 1: (코스트센터)  ↔ (Cost Center Code) → 팀·직간접구분 추가 (부서정보)
+        JOIN 2: (원가요소)    ↔ (계정번호)          → 계정명·계정그룹명·사용부서·비용 지급 범위·산출기준 추가
         JOIN 3: (원가요소)    ↔ (출력전표)           → 귀속_주관부서·귀속_사용부서 추가
 
     JOIN 후 처리:
         - 매칭 실패 텍스트 컬럼 → "(미매칭)"
         - 매칭 실패 숫자 컬럼  → 0
-        - 대상금액 = AMOUNT_COLS 합산 (pandas sum, 수식 미사용)
+        - 대상금액 = 사업비정보.csv의 '합계' 컬럼 (COL_TOTAL_AMOUNT)
 
     Args:
         df_filtered: filter_by_keyword()의 반환값
@@ -206,10 +188,10 @@ def enrich_data(
 
     # JOIN 후 텍스트 결측치 처리
     text_fill_cols = [
-        COLUMN_MAP["직간접구분"],       # 변경: 직간접구분 (CCM)
-        COLUMN_MAP["직간접구분_계정"],  # 직/간접비 (계정정보)
+        COLUMN_MAP["직간접구분"],       # 직간접구분 (부서정보)
         COLUMN_MAP["계정명"],           # 계정명
-        COLUMN_MAP["대상정의"],         # 대상정의 v3.0_0415
+        COLUMN_MAP["계정그룹명"],       # 계정그룹명
+        COLUMN_MAP["대상정의"],         # 대상정의
         COLUMN_MAP["범위"],             # 사용부서
         COLUMN_MAP["지급대상"],         # 비용 지급 범위
         COLUMN_MAP["산출기준"],         # 산출기준
@@ -221,13 +203,23 @@ def enrich_data(
             df[col] = df[col].fillna(FALLBACK_TEXT)
 
     # ── JOIN 후 숫자 결측치 처리 ──────────────────────────────────────────
-    for col in AMOUNT_COLS + NATURE_COLS:
+    for col in NATURE_COLS + [COL_TOTAL_AMOUNT]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-    # ── 대상금액 합산 (원칙 1 — 수식 배제, pandas 연산) ──────────────────
-    existing_amount_cols = [c for c in AMOUNT_COLS if c in df.columns]
-    df["대상금액"] = df[existing_amount_cols].sum(axis=1)
+    # ── 대상금액 = 사업비정보.csv의 '합계' 컬럼 ──────────────────────────
+    # 이 '대상금액' 값이 calc_dept_attribution의 팀별 합산
+    # (df_enriched.loc[..., "대상금액"].sum())을 거쳐 d주관/d사용['대상금액'].sum()
+    # 총계까지 흘러간다. 아래 calc_dept_attribution 주석 참조.
+    if COL_TOTAL_AMOUNT in df.columns:
+        df["대상금액"] = pd.to_numeric(df[COL_TOTAL_AMOUNT], errors="coerce").fillna(0)
+    else:
+        # 합계 컬럼이 없으면 성격 컬럼 합산으로 폴백 (방어적)
+        existing_nature = [c for c in NATURE_COLS if c in df.columns]
+        df["대상금액"] = df[existing_nature].sum(axis=1) if existing_nature else 0.0
+
+    # 대상금액 흐름 보장 — 이후 모든 부점/직간접/성격 집계의 금액 소스
+    assert "대상금액" in df.columns, "enrich_data: '대상금액' 컬럼 생성 실패"
 
     return df
 
@@ -260,6 +252,11 @@ def calc_dept_attribution(
         (df_주관부서, df_사용부서) 튜플.
         각 DataFrame 콜럼: ['부서명', '대상금액', '구성비(%)']
         금액 내림차순 정렬.
+
+    [대상금액 흐름]
+    enrich_data()가 사업비정보.csv '합계' 컬럼으로 세팅한 df_enriched['대상금액']이
+    여기서 팀별로 sum()되어 각 부서 행의 '대상금액'이 되고, pdf_exporter._tbl_dept의
+    d주관/d사용['대상금액'].sum() 총계로 이어진다.
     """
     empty = pd.DataFrame(columns=["부서명", "대상금액", "구성비(%)"])
 
@@ -344,9 +341,7 @@ def calc_direct_indirect(df_enriched: pd.DataFrame) -> dict[str, float]:
     """
     직공통비·총계를 계산한다.
 
-    우선순위: 계정정보 '직/간접비' 컬럼 → CCM '변경: 직접/공통 구분' 컬럼
-    (template_logic_summary: 직간접 구분 기준은 계정정보)
-
+    직간접 구분 기준은 부서정보.csv의 '직간접구분' 컬럼 (코스트센터 JOIN으로 결합).
     '직접' / '공통' 텍스트를 str.contains()로 유연하게 매칭하여
     값 표기 방식 변형(예: '직접비', '직접 비용')에도 대응한다.
 
@@ -358,17 +353,8 @@ def calc_direct_indirect(df_enriched: pd.DataFrame) -> dict[str, float]:
     """
     총계 = float(df_enriched["대상금액"].sum())
 
-    # 계정정보 컬럼 우선, 없거나 유효값 없으면 CCM 컬럼 폴백
-    # 유효값 = "직접" 또는 "공통" 텍스트를 포함하는 값이 1개 이상
-    acct_col = COLUMN_MAP["직간접구분_계정"]  # "직/간접비"
-    ccm_col  = COLUMN_MAP["직간접구분"]       # "변경: 직접/공통 구분"
-    _VALID_PATTERN = r"직접|공통"
-    if (acct_col in df_enriched.columns
-            and df_enriched[acct_col].astype(str)
-                .str.contains(_VALID_PATTERN, na=False).any()):
-        col = acct_col
-    else:
-        col = ccm_col
+    # 직간접 구분 기준 = 부서정보 '직간접구분' 컬럼
+    col = COLUMN_MAP["직간접구분"]
 
     if col not in df_enriched.columns:
         return {"직접비": 0.0, "공통비": 0.0, "총계": 총계, "_미분류경고": None}
@@ -424,7 +410,7 @@ def calc_nature_classification(
 
     Returns:
         컬럼: ['귀속_사용부서', '계약비', '유지비', '손해조사비', '투자관리비',
-               '기타사업비', '합계']
+               '간접비', '공통비', '소계']  (소계 = COL_SUBTOTAL)
         마지막 행: '귀속_사용부서' == '총계' 인 합산 행.
         대응되는 NATURE_COLS 컬럼이 없으면 빈 DataFrame 반환.
     """
@@ -562,7 +548,7 @@ def run_pipeline(
     편의 함수. 각 Step을 순서대로 실행하며 의존성을 유지한다.
 
     Args:
-        sheets:  data_loader.load_all_sheets()의 반환값
+        sheets:  data_loader.load_all_csvs()의 반환값
         keyword: 사용자 입력 키워드
 
     Returns:
@@ -581,6 +567,15 @@ def run_pipeline(
     df_ccm     = sheets[_SHEET_CCM]
     df_account = sheets[_SHEET_ACCOUNT]
     df_output  = sheets.get(_SHEET_OUTPUT, pd.DataFrame())
+
+    # ── 분류 근거: 해당 출력전표 코드의 출력.csv 행에서 텍스트 추출 ──────────
+    col_code = COLUMN_MAP["출력전표"]
+    basis_row = None
+    if not df_output.empty and col_code in df_output.columns:
+        matched = df_output[df_output[col_code].astype(str).str.strip() == str(keyword).strip()]
+        if not matched.empty:
+            basis_row = matched.iloc[0]
+    classification_basis = build_classification_basis(basis_row)
 
     # Step 1 — 필터링
     df_filtered = filter_by_keyword(df_actual, keyword)
@@ -602,6 +597,6 @@ def run_pipeline(
         "dept_사용":            df_사용,                                  # Step 3
         "direct_indirect":      di_result,                               # Step 4
         "nature":               calc_nature_classification(df_enriched, df_output), # Step 5
-        "classification_basis": CLASSIFICATION_BASIS,                    # 분류 근거 상수
+        "classification_basis": classification_basis,                   # 출력.csv 코드별 분류 근거
         "_미분류경고":          _미분류경고,
     }

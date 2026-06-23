@@ -101,8 +101,11 @@ _COLS_ACCT = [r / 7.0 * _WIDTH for r in [1.0, 1.0, 1.5, 1.0, 2.5]]
 # [D] 대상정의 2열: 라벨 22% | 데이터 78%
 _COLS_2 = [0.22 * _WIDTH, 0.78 * _WIDTH]
 
-# [E][G] 7열 테이블: 비율 1.2:1:1.2:0.8:1:1.2:0.8
+# [E] 부점귀속 7열 테이블: 비율 1.2:1:1.2:0.8:1:1.2:0.8 (부점별 + 주관3 + 사용3)
 _COLS_7 = [r / 7.2 * _WIDTH for r in [1.2, 1.0, 1.2, 0.8, 1.0, 1.2, 0.8]]
+
+# [G] 3-2 성격별 8열 테이블: 부점별 + NATURE 6 + 합계(소계)
+_COLS_8 = [r / 8.3 * _WIDTH for r in [1.3, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]]
 
 # [F] 직접비/공통비 2열: 구분 20% | 분류금액 80%
 _COLS_DI = [0.20 * _WIDTH, 0.80 * _WIDTH]
@@ -496,19 +499,23 @@ def _tbl_nature_31(di: dict, s: dict) -> list:
 # ── [G] 3-2. 성격별 분류 결과 ──────────────────────────────────────────────────
 
 def _tbl_nature_32(nat: pd.DataFrame, s: dict, fb: str) -> list:
+    # 데이터 접근은 내부 컬럼명(COL_SUBTOTAL="소계"), 표시 헤더는 "합계"로 유지
     _display_cols = NATURE_COLS + [COL_SUBTOTAL]
+    _header_labels = NATURE_COLS + ["합계"]
+    _last_col = len(_display_cols)   # 컬럼 인덱스: 0=부점별, 1..N=데이터 → 마지막 인덱스
 
     data = [
-        # 행 0: 컬럼 헤더 (부점별 + 성격 5종 + 합계 = 7열)
+        # 행 0: 컬럼 헤더 (부점별 + NATURE 6종 + 합계 = 8열)
         [_P('부점별<br/>(지역단별)<br/>귀속현황', s['hdr'])]
-        + [_P(c, s['hdr']) for c in _display_cols],
+        + [_P(c, s['hdr']) for c in _header_labels],
     ]
 
     if not nat.empty:
         # 루프 전 성격 컬럼 일괄 숫자형 변환 — 매 행마다 변환 반복을 방지하고 str 혼입을 방어
         nat_numeric = nat.copy()
-        for col in NATURE_COLS:
-            nat_numeric[col] = pd.to_numeric(nat_numeric[col], errors='coerce').fillna(0)
+        for col in _display_cols:
+            if col in nat_numeric.columns:
+                nat_numeric[col] = pd.to_numeric(nat_numeric[col], errors='coerce').fillna(0)
         for _, r in nat_numeric.iloc[:-1].iterrows():
             data.append(
                 [_P(str(r.get(COLUMN_MAP['귀속_사용부서'], '')), s['body'])]
@@ -526,45 +533,48 @@ def _tbl_nature_32(nat: pd.DataFrame, s: dict, fb: str) -> list:
 
     cmds = _base_style() + [
         # 헤더 행 0: 포인트 색상
-        ('BACKGROUND', (0, 0), (6, 0), s['c_primary']),
+        ('BACKGROUND', (0, 0), (_last_col, 0), s['c_primary']),
         ('ALIGN',      (0, 0), (0, 0), 'CENTER'),
-        # 총계 행: 노란색
-        ('BACKGROUND', (0, tot_idx), (6, tot_idx), colors.white),
-        ('FONTNAME',   (0, tot_idx), (6, tot_idx), fb),
+        # 총계 행: 흰색
+        ('BACKGROUND', (0, tot_idx), (_last_col, tot_idx), colors.white),
+        ('FONTNAME',   (0, tot_idx), (_last_col, tot_idx), fb),
     ]
 
-    # 데이터 행: 노란색
+    # 데이터 행: 흰색
     last_data = tot_idx - 1
     if last_data >= first_data:
-        cmds.append(('BACKGROUND', (0, first_data), (6, last_data), colors.white))
+        cmds.append(('BACKGROUND', (0, first_data), (_last_col, last_data), colors.white))
 
     title = _P('3-2. 성격별 분류 결과', s['sec'])
     desc  = _P(': 성격 분류는 직접비 및 공통비로 구분된 금액을 대상으로 '
                '실제 사용부서의 업무 성격에 따라 분류한 결과.', s['small'])
-    return [title, desc, Table(data, colWidths=_COLS_7, style=TableStyle(cmds))]
+    return [title, desc, Table(data, colWidths=_COLS_8, style=TableStyle(cmds))]
 
 
 # ── [H] 4. 분류 근거 ───────────────────────────────────────────────────────────
 
 def _tbl_basis(cb: dict, di: dict, nat: pd.DataFrame, s: dict) -> list:
-    # 직·공통비: 금액이 0이 아닌 항목의 설명만 포함
-    di_parts = []
-    if di.get('직접비', 0) != 0:
-        di_parts.append(cb.get('직접비_근거', ''))
-    if di.get('공통비', 0) != 0:
-        di_parts.append(cb.get('공통비_근거', ''))
+    # 직·공통비: 출력.csv의 직접비/간접비/공통비 근거 중 텍스트가 채워진 항목만 포함
+    di_parts = [
+        cb.get(f'{k}_근거', '').strip()
+        for k in ('직접비', '간접비', '공통비')
+    ]
+    di_parts = [t for t in di_parts if t]
     직공통비_text = '<br/><br/>'.join(di_parts)
 
-    # 성격별 분류: 부점 데이터 행 기준 절댓값 합이 0이 아닌 항목의 설명만 포함
+    # 성격별 분류: 부점 데이터 행 기준 절댓값 합이 0이 아니고 근거 텍스트가 있는 항목만 포함
     # 총계 Net값이 0이더라도 상계된 부점이 존재하면 분류 근거를 출력해야 하므로
     # 총계 행이 아닌 개별 부점 행의 절댓값 합으로 실질 거래 존재 여부를 판단한다.
     nat_parts = []
     if not nat.empty:
         dept_rows = nat[nat[COLUMN_MAP['귀속_사용부서']] != COL_TOTAL]
         for col in NATURE_COLS:
+            if col not in dept_rows.columns:
+                continue
             abs_sum = pd.to_numeric(dept_rows[col], errors='coerce').abs().sum()
-            if abs_sum > 0:
-                nat_parts.append(cb.get(f'{col}_근거', ''))
+            txt = cb.get(f'{col}_근거', '').strip()
+            if abs_sum > 0 and txt:
+                nat_parts.append(txt)
     성격별_text = '<br/><br/>'.join(nat_parts)
 
     data = [
