@@ -59,6 +59,63 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "주관": "주관부서",
         "사용": "사용부서",
     },
+    # ── PDF 표시 문구 (pdf_exporter.py가 출력하는 모든 라벨/제목/설명) ──────────
+    # 주의: 여기 값은 'PDF에 인쇄될 텍스트'이며, columns/nature_cols(=CSV 컬럼명)와
+    #       별개입니다. 섹션 키(header, section1 ...)와 항목 키는 수정하지 마세요.
+    "display_labels": {
+        "header": "[ 사업비 전표 분석 ]",
+        "account_table": {
+            "계정": "계정",
+            "계정코드": "계정코드",
+            "계정명": "계정명",
+            "사업비코드": "사업비 코드",
+            "채널구분": "채널구분",
+        },
+        "section1": {
+            "제목": "1. 대상정의",
+            "대상정의": "대상정의",
+            "범위": "범위",
+            "지급대상": "지급대상",
+            "산출기준": "산출기준",
+        },
+        "section2": {
+            "제목": "2. 부점귀속 현황",
+            "귀속현황": "귀속현황",
+            "주관부서귀속": "주관부서 귀속",
+            "실제사용부서귀속": "실제 사용부서 귀속",
+            "부점명": "부점명",
+            "대상금액": "대상금액(단위: 원)",
+            "구성비": "구성비(%)",
+            "총계": "총계",
+            "설명": ": 주관부서 귀속은 전표 발의 및 예산 통제 조직 기준이며, 실제 사용부서 귀속은 "
+                    "업무 수행 및 비용 효익이 실질적으로 귀속되는 조직 기준.",
+        },
+        "section3_1": {
+            "제목": "3-1. 직접비 공통비 분류 결과",
+            "구분": "구분",
+            "분류금액": "분류금액",
+            "직접비": "직접비",
+            "공통비": "공통비",
+        },
+        "section3_2": {
+            "제목": "3-2. 성격별 분류 결과",
+            "귀속현황": "귀속현황",
+            "합계": "합계",
+            "설명": ": 성격 분류는 직접비로 구분된 금액을 계정 성격에 따라 분류하며, "
+                    "공통비로 구분된 금액은 귀속 부서 성격에 따라 공통부서에서 직접 부서로 순차적 배부됨.",
+            # 성격별 컬럼 표시명 — CSV 컬럼명(nature_cols)과 별개의 인쇄 텍스트.
+            # CSV nature_cols와 같은 순서로 매칭되며, 부족분은 CSV 컬럼명으로 대체됩니다.
+            "nature_cols": [
+                "계약체결비", "계약유지비", "손해조사비", "투자관리비", "간접비", "공통비",
+            ],
+        },
+        "section4": {
+            "제목": "4. 분류 근거",
+            "직공통비": "직 • 공통비",
+            "성격별분류": "성격별 분류",
+            "참조": "총괄문서 참조",
+        },
+    },
 }
 
 # ── CSV별 검증 대상 컬럼 키 목록 ──────────────────────────────────────────────
@@ -83,6 +140,15 @@ CSV_LABELS: dict[str, str] = {
 #  Public API
 # ════════════════════════════════════════════════════════════════════════════
 
+def default_display_labels() -> dict[str, Any]:
+    """기본 PDF 표시 문구(display_labels)의 깊은 복사본을 반환한다.
+
+    labels 인자가 주어지지 않은 호출부(예: pdf_exporter.export(labels=None))의
+    안전한 폴백 값으로 사용된다.
+    """
+    return copy.deepcopy(_DEFAULT_CONFIG["display_labels"])
+
+
 def load_config() -> dict[str, Any]:
     """column_config.yaml을 로드하고 기본값과 deep-merge하여 반환한다.
 
@@ -105,20 +171,17 @@ def load_config() -> dict[str, Any]:
 
 
 def save_config(config: dict[str, Any]) -> bool:
-    """설정을 column_config.yaml에 한국어 주석 헤더와 함께 저장한다.
+    """설정을 column_config.yaml에 한국어 주석을 보존하여 저장한다.
+
+    plain yaml.dump 대신 _render_annotated_yaml() 로 섹션별 주석을 재생성하여,
+    저장 후에도 사람이 읽을 수 있는 안내 주석이 사라지지 않도록 한다.
 
     Returns:
         True: 저장 성공, False: OS 오류로 저장 실패 (쓰기 권한 부족 등)
     """
     try:
-        body = yaml.dump(
-            config,
-            allow_unicode=True,
-            default_flow_style=False,
-            indent=2,
-            sort_keys=False,
-        )
-        _CONFIG_PATH.write_text(_YAML_HEADER + body, encoding="utf-8")
+        merged = _deep_merge(_DEFAULT_CONFIG, config)
+        _CONFIG_PATH.write_text(_render_annotated_yaml(merged), encoding="utf-8")
         return True
     except OSError:
         return False
@@ -129,7 +192,7 @@ def generate_default_config_file() -> None:
     if _CONFIG_PATH.exists():
         return
     try:
-        _CONFIG_PATH.write_text(_YAML_HEADER + _ANNOTATED_YAML_BODY, encoding="utf-8")
+        _CONFIG_PATH.write_text(_render_annotated_yaml(_DEFAULT_CONFIG), encoding="utf-8")
     except OSError:
         pass
 
@@ -220,47 +283,86 @@ _YAML_HEADER = """\
 
 """
 
-_ANNOTATED_YAML_BODY = """\
-columns:
-  # ── 사업비정보.csv ──────────────────────────────────────────────────────
-  원가요소: "원가요소"
-  코스트센터: "코스트센터"
+def _yaml_dq(value: Any) -> str:
+    """YAML 큰따옴표 스칼라로 직렬화한다 (백슬래시·큰따옴표만 이스케이프).
 
-  # ── 계정정보.csv ───────────────────────────────────────────────────────
-  계정번호: "계정번호"
-  계정명: "계정명"
-  계정그룹ID: "계정그룹ID"
-  계정그룹명: "계정그룹명"
-  대상정의: "대상정의"
-  범위: "사용 부서"
-  지급대상: "비용 지급 범위"
-  산출기준: "산출기준"
+    라벨 값에는 ':' '%' '•' '(' 등이 들어갈 수 있어 항상 인용 처리한다.
+    """
+    s = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{s}"'
 
-  # ── 부서정보.csv ───────────────────────────────────────────────────────
-  cc_code: "Cost Center Code"
-  직간접구분: "직간접구분"
-  팀: "팀"
 
-  # ── 출력.csv ───────────────────────────────────────────────────────────
-  출력전표: "출력전표"
-  귀속_주관부서: "주관부서"
-  귀속_사용부서: "사용부서"
+def _render_annotated_yaml(config: dict[str, Any]) -> str:
+    """config 값으로 주석이 포함된 column_config.yaml 본문 전체를 생성한다.
 
-nature_cols:
-  # ⚠️  성격별 분류 컬럼명(사업비정보.csv의 실제 숫자 값)이 바뀌면 아래 목록을 수정하세요.
-  # 순서도 보고서 테이블의 컬럼 순서에 영향을 줍니다.
-  - "계약체결비"
-  - "계약유지비"
-  - "손해조사비"
-  - "투자관리비"
-  - "간접비"
-  - "공통비"
+    columns / nature_cols / col_team / output_labels 블록은 섹션 주석과 함께
+    config 값으로 재구성하고, display_labels 블록은 주석 헤더 + yaml.dump 로 덧붙인다.
+    save_config / generate_default_config_file 양쪽이 공유한다.
+    """
+    cols = config.get("columns", {})
+    out_lbl = config.get("output_labels", {})
+    nat = config.get("nature_cols", [])
 
-col_team: "팀"   # 부서정보.csv의 팀 컬럼명. 이름이 바뀌면 여기를 수정하세요.
+    def col(key: str) -> str:
+        return _yaml_dq(cols.get(key, key))
 
-output_labels:
-  # 출력.csv 안에서 사용하는 컬럼 레이블입니다.
-  코드: "출력전표"
-  주관: "주관부서"
-  사용: "사용부서"
-"""
+    lines: list[str] = [_YAML_HEADER.rstrip("\n"), ""]
+
+    lines += [
+        "columns:",
+        "  # ── 사업비정보.csv ──────────────────────────────────────────────────────",
+        f"  원가요소: {col('원가요소')}",
+        f"  코스트센터: {col('코스트센터')}",
+        "",
+        "  # ── 계정정보.csv ───────────────────────────────────────────────────────",
+        f"  계정번호: {col('계정번호')}",
+        f"  계정명: {col('계정명')}",
+        f"  계정그룹ID: {col('계정그룹ID')}",
+        f"  계정그룹명: {col('계정그룹명')}",
+        f"  대상정의: {col('대상정의')}",
+        f"  범위: {col('범위')}",
+        f"  지급대상: {col('지급대상')}",
+        f"  산출기준: {col('산출기준')}",
+        "",
+        "  # ── 부서정보.csv ───────────────────────────────────────────────────────",
+        f"  cc_code: {col('cc_code')}",
+        f"  직간접구분: {col('직간접구분')}",
+        f"  팀: {col('팀')}",
+        "",
+        "  # ── 출력.csv ───────────────────────────────────────────────────────────",
+        f"  출력전표: {col('출력전표')}",
+        f"  귀속_주관부서: {col('귀속_주관부서')}",
+        f"  귀속_사용부서: {col('귀속_사용부서')}",
+        "",
+        "nature_cols:",
+        "  # ⚠️  성격별 분류 컬럼명(사업비정보.csv의 실제 숫자 값)이 바뀌면 아래 목록을 수정하세요.",
+        "  # 순서도 보고서 테이블의 컬럼 순서에 영향을 줍니다.",
+    ]
+    lines += [f"  - {_yaml_dq(v)}" for v in nat]
+    lines += [
+        "",
+        f"col_team: {_yaml_dq(config.get('col_team', '팀'))}   # 부서정보.csv의 팀 컬럼명. 이름이 바뀌면 여기를 수정하세요.",
+        "",
+        "output_labels:",
+        "  # 출력.csv 안에서 사용하는 컬럼 레이블입니다.",
+        f"  코드: {_yaml_dq(out_lbl.get('코드', '출력전표'))}",
+        f"  주관: {_yaml_dq(out_lbl.get('주관', '주관부서'))}",
+        f"  사용: {_yaml_dq(out_lbl.get('사용', '사용부서'))}",
+        "",
+        "display_labels:",
+        "  # PDF에 인쇄되는 모든 표시 문구입니다. (CSV 컬럼명과 별개)",
+        "  # 큰따옴표 안의 텍스트만 수정하고, 왼쪽 항목 키는 바꾸지 마세요.",
+    ]
+
+    dl_dump = yaml.dump(
+        {"display_labels": config.get("display_labels", {})},
+        allow_unicode=True,
+        default_flow_style=False,
+        indent=2,
+        sort_keys=False,
+    )
+    # 최상위 'display_labels:' 줄은 위에서 주석과 함께 직접 출력했으므로 제거하고 본문만 덧붙인다.
+    dl_body = "\n".join(dl_dump.splitlines()[1:])
+    lines.append(dl_body)
+
+    return "\n".join(lines).rstrip("\n") + "\n"

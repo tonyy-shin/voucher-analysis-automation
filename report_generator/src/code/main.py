@@ -22,7 +22,7 @@ from data_loader import _SHEET_OUTPUT, COLUMN_MAP
 from company_theme import CompanyTheme
 from theme_manager import GRAY_DEFAULT, load_theme, save_theme
 from config_manager import (
-    load_config, validate_csv_columns,
+    load_config, save_config, validate_csv_columns, default_display_labels,
 )
 
 # ── 모듈 상수 ─────────────────────────────────────────────────────────────────
@@ -61,13 +61,16 @@ def _fmt_slot_label(path: str | None) -> str:
     return name if len(name) <= 30 else "..." + name[-27:]
 
 
-def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
-    """포인트 색상·로고 설정 팝업 (로고 최대 3개 슬롯).
+def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> CompanyTheme:
+    """포인트 색상·로고·문구 설정 팝업 (탭 구성).
+
+    [브랜드 설정] 탭: 포인트 색상 + 로고 최대 3개 슬롯.
+    [문구 설정]   탭: PDF에 인쇄되는 모든 표시 문구(config["display_labels"]) 편집.
 
     Returns:
-        [저장 후 계속] 클릭: 저장된 새 CompanyTheme
+        [저장 후 계속] 클릭: 저장된 새 CompanyTheme (display_labels도 column_config.yaml에 저장)
         [취소] 또는 X 버튼: 원본 theme 반환 (저장 안 함)
-        [기본값 복원] 클릭: GRAY_DEFAULT 저장 후 반환
+        [기본값 복원] 클릭: GRAY_DEFAULT 저장 후 반환 (문구는 변경하지 않음)
     """
     result = [theme]
     current_hex = [theme.primary_hex]
@@ -75,13 +78,27 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
     # 3슬롯 초기화: theme.logo_paths 에서 최대 3개, 부족분은 None 으로 패딩
     slots: list[str | None] = (list(theme.logo_paths[:3]) + [None, None, None])[:3]
 
+    # display_labels 누락 방어 (정상 흐름에서는 load_config가 채워 줌)
+    config.setdefault("display_labels", default_display_labels())
+
     dlg = tk.Toplevel(root)
-    dlg.title("포인트 색상·로고 설정")
+    dlg.title("포인트 색상·로고·문구 설정")
     dlg.resizable(False, False)
     dlg.lift()
+    dlg.grid_rowconfigure(0, weight=1)
+    dlg.grid_columnconfigure(0, weight=1)
+
+    notebook = ttk.Notebook(dlg)
+    notebook.grid(row=0, column=0, sticky="nsew", padx=8, pady=(8, 4))
+
+    # ════════════════════════════════════════════════════════════════════
+    #  탭 1: 브랜드 설정 (포인트 색상 + 로고)
+    # ════════════════════════════════════════════════════════════════════
+    brand = ttk.Frame(notebook)
+    notebook.add(brand, text="브랜드 설정")
 
     # ── 색상 미리보기 레이블 ──────────────────────────────────────────────
-    preview_frame = tk.Frame(dlg, bd=1, relief="sunken")
+    preview_frame = tk.Frame(brand, bd=1, relief="sunken")
     preview_frame.grid(row=0, column=0, columnspan=7, padx=12, pady=(12, 4), sticky="ew")
 
     swatch = tk.Label(preview_frame, bg=current_hex[0], width=8, height=2)
@@ -98,16 +115,16 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
             swatch.config(bg=current_hex[0])
             hex_label.config(text=current_hex[0])
 
-    tk.Label(dlg, text="섹션 헤더·상하단 바 색상:").grid(row=1, column=0, padx=12, pady=4, sticky="w")
-    tk.Button(dlg, text="색상 선택", command=_pick_color).grid(row=1, column=1, padx=4, pady=4)
+    tk.Label(brand, text="섹션 헤더·상하단 바 색상:").grid(row=1, column=0, padx=12, pady=4, sticky="w")
+    tk.Button(brand, text="색상 선택", command=_pick_color).grid(row=1, column=1, padx=4, pady=4)
 
     # ── 구분선 ────────────────────────────────────────────────────────────
-    tk.Frame(dlg, height=1, bg="#cccccc").grid(
+    tk.Frame(brand, height=1, bg="#cccccc").grid(
         row=2, column=0, columnspan=7, sticky="ew", padx=12, pady=(4, 0)
     )
 
     # ── 로고 슬롯 (3행) ───────────────────────────────────────────────────
-    tk.Label(dlg, text="회사 로고 이미지 (최대 3개):").grid(
+    tk.Label(brand, text="회사 로고 이미지 (최대 3개):").grid(
         row=3, column=0, columnspan=7, padx=12, pady=(8, 4), sticky="w"
     )
 
@@ -118,13 +135,13 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
         pass
 
     for i in range(3):
-        tk.Label(dlg, text=f"로고 {i + 1}:", width=7, anchor="e").grid(
+        tk.Label(brand, text=f"로고 {i + 1}:", width=7, anchor="e").grid(
             row=4 + i, column=0, padx=(12, 4), pady=3, sticky="e"
         )
 
         var = tk.StringVar(value=_fmt_slot_label(slots[i]))
         slot_vars.append(var)
-        tk.Label(dlg, textvariable=var, font=("Consolas", 8), fg="#444444",
+        tk.Label(brand, textvariable=var, font=("Consolas", 8), fg="#444444",
                  anchor="w", width=32, relief="sunken", padx=3).grid(
             row=4 + i, column=1, padx=2, pady=3, sticky="ew"
         )
@@ -150,20 +167,20 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
                 update_preview()
             return _clear
 
-        tk.Button(dlg, text="변경", width=6, command=_make_pick(i)).grid(
+        tk.Button(brand, text="변경", width=6, command=_make_pick(i)).grid(
             row=4 + i, column=2, padx=2, pady=3
         )
-        tk.Button(dlg, text="삭제", width=6, command=_make_clear(i)).grid(
+        tk.Button(brand, text="삭제", width=6, command=_make_clear(i)).grid(
             row=4 + i, column=3, padx=(2, 8), pady=3
         )
 
         # ── 슬롯별 높이 슬라이더 (column 4~6) ───────────────────────────
-        tk.Label(dlg, text="높이:", anchor="e").grid(
+        tk.Label(brand, text="높이:", anchor="e").grid(
             row=4 + i, column=4, padx=(8, 2), pady=3, sticky="e"
         )
         sv = tk.DoubleVar(value=theme.logo_heights[i])
         scale_vars.append(sv)
-        val_lbl = tk.Label(dlg, text=str(int(theme.logo_heights[i])), width=4, anchor="e")
+        val_lbl = tk.Label(brand, text=str(int(theme.logo_heights[i])), width=4, anchor="e")
         val_lbl.grid(row=4 + i, column=6, padx=(2, 12), pady=3, sticky="e")
 
         def _make_scale_cb(lbl):
@@ -172,12 +189,12 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
             return _cb
 
         ttk.Scale(
-            dlg, from_=16, to=96, orient="horizontal",
+            brand, from_=16, to=96, orient="horizontal",
             variable=sv, command=_make_scale_cb(val_lbl),
         ).grid(row=4 + i, column=5, padx=2, pady=3, sticky="ew")
 
     # ── 구분선 ────────────────────────────────────────────────────────────
-    tk.Frame(dlg, height=1, bg="#cccccc").grid(
+    tk.Frame(brand, height=1, bg="#cccccc").grid(
         row=7, column=0, columnspan=7, sticky="ew", padx=12, pady=(8, 0)
     )
 
@@ -187,11 +204,11 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
         from PIL import Image, ImageTk  # optional; silently skipped if absent
 
         preview_canvas = tk.Canvas(
-            dlg, width=_PREV_W, height=_PREV_H,
+            brand, width=_PREV_W, height=_PREV_H,
             bg="#f5f5f5", highlightthickness=1,
             highlightbackground="#cccccc",
         )
-        preview_canvas.grid(row=8, column=0, columnspan=7, padx=12, pady=(4, 0))
+        preview_canvas.grid(row=8, column=0, columnspan=7, padx=12, pady=(4, 12))
 
         def update_preview(*_args):  # 위 no-op 재바인딩
             preview_canvas.delete("all")
@@ -236,9 +253,129 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
     except ImportError:
         pass
 
-    # ── 버튼 행 ──────────────────────────────────────────────────────────
+    # ════════════════════════════════════════════════════════════════════
+    #  탭 2: 문구 설정 (PDF 표시 라벨)
+    # ════════════════════════════════════════════════════════════════════
+    labels_tab = ttk.Frame(notebook)
+    notebook.add(labels_tab, text="문구 설정")
+
+    _dl = config["display_labels"]
+
+    # (그룹 제목, [(경로, 캡션), ...]) — 섹션 간 동일 텍스트는 캡션에 섹션을 명시한다.
+    _label_groups: list[tuple[str, list[tuple[tuple, str]]]] = [
+        ("상단", [
+            (("header",), "제목 배너"),
+        ]),
+        ("계정 테이블", [
+            (("account_table", "계정"), "계정"),
+            (("account_table", "계정코드"), "계정코드"),
+            (("account_table", "계정명"), "계정명"),
+            (("account_table", "사업비코드"), "사업비 코드"),
+            (("account_table", "채널구분"), "채널구분"),
+        ]),
+        ("1. 대상정의", [
+            (("section1", "제목"), "섹션 제목"),
+            (("section1", "대상정의"), "대상정의"),
+            (("section1", "범위"), "범위"),
+            (("section1", "지급대상"), "지급대상"),
+            (("section1", "산출기준"), "산출기준"),
+        ]),
+        ("2. 부점귀속 현황", [
+            (("section2", "제목"), "섹션 제목"),
+            (("section2", "귀속현황"), "귀속현황 (섹션2)"),
+            (("section2", "주관부서귀속"), "주관부서 귀속"),
+            (("section2", "실제사용부서귀속"), "실제 사용부서 귀속"),
+            (("section2", "부점명"), "부점명"),
+            (("section2", "대상금액"), "대상금액 헤더"),
+            (("section2", "구성비"), "구성비 헤더"),
+            (("section2", "총계"), "부점귀속 총계 (섹션2)"),
+            (("section2", "설명"), "설명 문구"),
+        ]),
+        ("3-1. 직접비 공통비 분류 결과", [
+            (("section3_1", "제목"), "섹션 제목"),
+            (("section3_1", "구분"), "구분"),
+            (("section3_1", "분류금액"), "분류금액"),
+            (("section3_1", "직접비"), "직접비"),
+            (("section3_1", "공통비"), "공통비"),
+        ]),
+        ("3-2. 성격별 분류 결과", [
+            (("section3_2", "제목"), "섹션 제목"),
+            (("section3_2", "귀속현황"), "귀속현황 (섹션3-2)"),
+            (("section3_2", "합계"), "합계 헤더"),
+            (("section3_2", "설명"), "설명 문구"),
+            (("section3_2", "nature_cols", 0), "성격 컬럼 1"),
+            (("section3_2", "nature_cols", 1), "성격 컬럼 2"),
+            (("section3_2", "nature_cols", 2), "성격 컬럼 3"),
+            (("section3_2", "nature_cols", 3), "성격 컬럼 4"),
+            (("section3_2", "nature_cols", 4), "성격 컬럼 5"),
+            (("section3_2", "nature_cols", 5), "성격 컬럼 6"),
+        ]),
+        ("4. 분류 근거", [
+            (("section4", "제목"), "섹션 제목"),
+            (("section4", "직공통비"), "좌측 라벨 1 (직 • 공통비)"),
+            (("section4", "성격별분류"), "좌측 라벨 2 (성격별 분류)"),
+            (("section4", "참조"), "우측 참조 문구"),
+        ]),
+    ]
+
+    def _dl_get(path: tuple):
+        cur = _dl
+        try:
+            for k in path:
+                cur = cur[k]
+            return cur
+        except (KeyError, IndexError, TypeError):
+            return ""
+
+    # ── 스크롤 가능한 라벨 편집 영역 ──────────────────────────────────────
+    _lbl_canvas = tk.Canvas(labels_tab, width=600, height=380, highlightthickness=0)
+    _lbl_vsb = tk.Scrollbar(labels_tab, orient="vertical", command=_lbl_canvas.yview)
+    _lbl_inner = tk.Frame(_lbl_canvas)
+    _lbl_inner.bind(
+        "<Configure>",
+        lambda e: _lbl_canvas.configure(scrollregion=_lbl_canvas.bbox("all")),
+    )
+    _lbl_canvas.create_window((0, 0), window=_lbl_inner, anchor="nw")
+    _lbl_canvas.configure(yscrollcommand=_lbl_vsb.set)
+    _lbl_canvas.pack(side="left", fill="both", expand=True)
+    _lbl_vsb.pack(side="right", fill="y")
+
+    # 마우스 휠 스크롤 — 탭에 들어왔을 때만 bind_all, 나갈 때 해제 (다이얼로그 간 누수 방지)
+    def _on_wheel(event):
+        _lbl_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+    _lbl_canvas.bind("<Enter>", lambda e: _lbl_canvas.bind_all("<MouseWheel>", _on_wheel))
+    _lbl_canvas.bind("<Leave>", lambda e: _lbl_canvas.unbind_all("<MouseWheel>"))
+
+    label_vars: dict[tuple, tk.StringVar] = {}
+    _r = 0
+    for group_title, fields in _label_groups:
+        tk.Label(
+            _lbl_inner, text=group_title, font=("맑은 고딕", 10, "bold"),
+            anchor="w", fg="#2E2E38",
+        ).grid(row=_r, column=0, columnspan=2, sticky="w", padx=8, pady=(10, 2))
+        _r += 1
+        for path, caption in fields:
+            tk.Label(_lbl_inner, text=caption, width=20, anchor="e").grid(
+                row=_r, column=0, padx=(8, 4), pady=2, sticky="e"
+            )
+            v = tk.StringVar(value=str(_dl_get(path)))
+            label_vars[path] = v
+            tk.Entry(_lbl_inner, textvariable=v, width=56).grid(
+                row=_r, column=1, padx=(0, 12), pady=2, sticky="ew"
+            )
+            _r += 1
+
+    def _dl_set(path: tuple, value: str) -> None:
+        cur = config["display_labels"]
+        for k in path[:-1]:
+            cur = cur[k]
+        cur[path[-1]] = value
+
+    # ════════════════════════════════════════════════════════════════════
+    #  버튼 행 (노트북 하단)
+    # ════════════════════════════════════════════════════════════════════
     btn_frame = tk.Frame(dlg)
-    btn_frame.grid(row=9, column=0, columnspan=7, pady=(8, 12), padx=12)
+    btn_frame.grid(row=1, column=0, pady=(4, 12), padx=12)
 
     def _save_and_close():
         valid_paths = [p for p in slots if p]
@@ -250,6 +387,18 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme) -> CompanyTheme:
             logo_heights=[int(v.get()) for v in scale_vars],
         )
         save_theme(new_theme)
+
+        # 편집된 표시 문구를 config에 반영 후 column_config.yaml에 저장
+        for path, var in label_vars.items():
+            _dl_set(path, var.get())
+        if not save_config(config):
+            messagebox.showwarning(
+                "문구 저장 실패",
+                "표시 문구를 column_config.yaml에 저장하지 못했습니다.\n"
+                "(쓰기 권한을 확인하세요. 색상·로고 설정은 정상 저장되었습니다.)",
+                parent=dlg,
+            )
+
         result[0] = new_theme
         dlg.destroy()
 
@@ -390,7 +539,7 @@ def main() -> None:
         f"현재 색상: {theme.primary_hex}\n"
         "('아니오' 선택 시 현재 설정으로 바로 진행합니다.)",
     ):
-        theme = _show_theme_dialog(root, theme)
+        theme = _show_theme_dialog(root, theme, config)
 
     # ── Step 1: 입력 CSV 파일 4개 선택 ────────────────────────────────────
     file_paths = _show_file_select_dialog(root)
@@ -560,7 +709,10 @@ def main() -> None:
     # ── Stage 3: PDF 생성 ─────────────────────────────────────────────────
     for code_str, results in _pipeline_results.items():
         pdf_path = os.path.join(out_dir, _PDF_FILENAME_TEMPLATE.format(code_str))
-        ok = pdf_exporter.export(results, pdf_path, code_str, theme=theme, logo_heights=theme.logo_heights)
+        ok = pdf_exporter.export(
+            results, pdf_path, code_str, theme=theme,
+            logo_heights=theme.logo_heights, labels=config["display_labels"],
+        )
         if not ok:
             errors.append((code_str, "PDF 생성 실패"))
             continue
