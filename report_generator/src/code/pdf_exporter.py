@@ -95,7 +95,7 @@ _COLS_HEADER_TITLE_3 = [_WIDTH * 0.60, _WIDTH * 0.40] # 헤더 테이블: 타이
 _RENDER_DPI        = 150                               # 로고 사전 리사이즈 기준 DPI
 
 # ── 섹션별 컬럼 너비 ──────────────────────────────────────────────────────────
-# [C] Account 테이블: Account | Code | Name | GroupCode | GroupName (비율 1:1:1.5:1:2.5)
+# [C] 계정 테이블: 계정 | 계정코드 | 계정명 | 사업비코드 | 채널구분 (비율 1:1:1.5:1:2.5)
 _COLS_ACCT = [r / 7.0 * _WIDTH for r in [1.0, 1.0, 1.5, 1.0, 2.5]]
 
 # [D] 대상정의 2열: 라벨 22% | 데이터 78%
@@ -380,12 +380,12 @@ def _tbl_header(s: dict, logo_max_height: int = 48,
     return t
 
 
-# ── [C] Account 헤더 테이블 ────────────────────────────────────────────────────
+# ── [C] 계정 헤더 테이블 ────────────────────────────────────────────────────
 
 def _tbl_account(ai: dict, s: dict) -> Table:
     data = [
-        [_P('Account', s['hdr']),      _P('Account Code', s['hdr']),
-         _P('Account Name', s['hdr']), _P('사업비 코드', s['hdr']),
+        [_P('계정', s['hdr']),      _P('계정코드', s['hdr']),
+         _P('계정명', s['hdr']), _P('사업비 코드', s['hdr']),
          _P('채널구분', s['hdr'])],
         ['',
          _P(ai.get('계정번호', ''), s['body']),
@@ -396,7 +396,7 @@ def _tbl_account(ai: dict, s: dict) -> Table:
     cmds = _base_style() + [
         ('BACKGROUND', (0, 0), (-1, 0), s['c_primary']),        # 헤더행
         ('BACKGROUND', (0, 1), (-1, 1), colors.white),          # 데이터행: 흰색
-        ('SPAN',       (0, 0), (0, 1)),                          # Account 셀 세로 병합
+        ('SPAN',       (0, 0), (0, 1)),                          # 계정 셀 세로 병합
         ('BACKGROUND', (0, 0), (0, 1), s['c_primary']),          # SPAN 셀 전체 (덮어쓰기)
     ]
     return Table(data, colWidths=_COLS_ACCT, style=TableStyle(cmds))

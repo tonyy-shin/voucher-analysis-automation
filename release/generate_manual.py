@@ -397,7 +397,7 @@ def build_story(s: dict) -> list:
     story.append(gap(4))
     pdf_rows = [
         [Paragraph("헤더", s["td_b"]),
-         Paragraph("로고 + 포인트 색상 바, 계정 정보(Account Code/Name/Group)", s["td"])],
+         Paragraph("로고 + 포인트 색상 바, 계정 정보(계정코드/계정명/사업비 코드/채널구분)", s["td"])],
         [Paragraph("1. 대상정의", s["td_b"]),
          Paragraph("대상정의·범위(사용 부서)·지급대상(비용 지급 범위)·산출기준", s["td"])],
         [Paragraph("2. 부점귀속", s["td_b"]),

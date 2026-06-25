@@ -188,8 +188,8 @@ def _tbl_header(s: dict) -> Table:
 
 def _tbl_account(s: dict) -> Table:
     data = [
-        [_P("Account", s["hdr_w"]), _P("Account Code", s["hdr_w"]),
-         _P("Account Name", s["hdr_w"]), _P("사업비 코드", s["hdr_w"]),
+        [_P("계정", s["hdr_w"]), _P("계정코드", s["hdr_w"]),
+         _P("계정명", s["hdr_w"]), _P("사업비 코드", s["hdr_w"]),
          _P("채널구분", s["hdr_w"])],
         ["", "", "", "", ""],
     ]
