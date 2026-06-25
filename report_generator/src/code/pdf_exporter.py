@@ -105,8 +105,7 @@ _COLS_2 = [0.22 * _WIDTH, 0.78 * _WIDTH]
 # [E] 부점귀속 7열 테이블: 비율 1.2:1:1.2:0.8:1:1.2:0.8 (부점별 + 주관3 + 사용3)
 _COLS_7 = [r / 7.2 * _WIDTH for r in [1.2, 1.0, 1.2, 0.8, 1.0, 1.2, 0.8]]
 
-# [G] 3-2 성격별 8열 테이블: 부점별 + NATURE 6 + 합계(소계)
-_COLS_8 = [r / 8.3 * _WIDTH for r in [1.3, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]]
+# [G] 3-2 성격별 테이블 너비는 _tbl_nature_32에서 성격 컬럼 수에 맞춰 동적 산출한다.
 
 # [F] 직접비/공통비 2열: 구분 20% | 분류금액 80%
 _COLS_DI = [0.20 * _WIDTH, 0.80 * _WIDTH]
@@ -559,9 +558,14 @@ def _tbl_nature_32(nat: pd.DataFrame, s: dict, fb: str) -> list:
     if last_data >= first_data:
         cmds.append(('BACKGROUND', (0, first_data), (_last_col, last_data), colors.white))
 
+    # 컬럼 너비를 성격 컬럼 수에 맞춰 동적 산출 (귀속현황 1.3 : 성격 N×1.0 : 합계 1.0).
+    # 전체 표 너비(_WIDTH)는 유지하고 비율로 분배한다. N=6일 때 기존 _COLS_8과 동일.
+    _ratios = [1.3] + [1.0] * len(NATURE_COLS) + [1.0]
+    _cols_w = [r / sum(_ratios) * _WIDTH for r in _ratios]
+
     title = _P(L['제목'], s['sec'])
     desc  = _P(L['설명'], s['small'])
-    return [title, desc, Table(data, colWidths=_COLS_8, style=TableStyle(cmds))]
+    return [title, desc, Table(data, colWidths=_cols_w, style=TableStyle(cmds))]
 
 
 # ── [H] 4. 분류 근거 ───────────────────────────────────────────────────────────

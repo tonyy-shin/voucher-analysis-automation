@@ -122,8 +122,11 @@ def _apply_config_overrides(config: dict | None) -> None:
     for k, v in config.get("columns", {}).items():
         if k in COLUMN_MAP and v:
             COLUMN_MAP[k] = v
-    if "nature_cols" in config and isinstance(config["nature_cols"], list):
-        NATURE_COLS = list(config["nature_cols"])
+    # 빈 리스트가 전체 성격 컬럼을 지우는 것을 방어한다.
+    if "nature_cols" in config and isinstance(config["nature_cols"], list) and config["nature_cols"]:
+        # in-place 수정 — processor / pdf_exporter 의 from-import 가 가리키는 동일 객체를 유지하여
+        # 오버라이드가 두 모듈에 그대로 전파되도록 한다 (COLUMN_MAP dict 변형과 동일 패턴).
+        NATURE_COLS[:] = list(config["nature_cols"])
     if "col_team" in config and config["col_team"]:
         COL_TEAM = str(config["col_team"])
         COLUMN_MAP["팀"] = COL_TEAM

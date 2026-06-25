@@ -298,17 +298,13 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             (("section3_1", "직접비"), "직접비"),
             (("section3_1", "공통비"), "공통비"),
         ]),
+        # 성격 컬럼(nature_cols)은 개수가 가변이므로 아래 정적 목록이 아닌
+        # 동적 편집 블록(_render_nature_rows)으로 렌더링한다.
         ("3-2. 성격별 분류 결과", [
             (("section3_2", "제목"), "섹션 제목"),
             (("section3_2", "귀속현황"), "귀속현황 (섹션3-2)"),
             (("section3_2", "합계"), "합계 헤더"),
             (("section3_2", "설명"), "설명 문구"),
-            (("section3_2", "nature_cols", 0), "성격 컬럼 1"),
-            (("section3_2", "nature_cols", 1), "성격 컬럼 2"),
-            (("section3_2", "nature_cols", 2), "성격 컬럼 3"),
-            (("section3_2", "nature_cols", 3), "성격 컬럼 4"),
-            (("section3_2", "nature_cols", 4), "성격 컬럼 5"),
-            (("section3_2", "nature_cols", 5), "성격 컬럼 6"),
         ]),
         ("4. 분류 근거", [
             (("section4", "제목"), "섹션 제목"),
@@ -346,6 +342,49 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
     _lbl_canvas.bind("<Enter>", lambda e: _lbl_canvas.bind_all("<MouseWheel>", _on_wheel))
     _lbl_canvas.bind("<Leave>", lambda e: _lbl_canvas.unbind_all("<MouseWheel>"))
 
+    # ── 성격 컬럼(3-2) 동적 편집 상태 — nature_cols(CSV명)=display명 통합 리스트 ──
+    nature_vars: list[tk.StringVar] = [
+        tk.StringVar(value=str(x)) for x in config.get("nature_cols", [])
+    ]
+    nature_frame = tk.Frame(_lbl_inner)   # section3_2 블록 내부에 grid 됨
+    add_var = tk.StringVar()
+
+    def _render_nature_rows():
+        for w in nature_frame.winfo_children():
+            w.destroy()
+        for idx, var in enumerate(nature_vars):
+            tk.Label(nature_frame, text=f"성격 {idx + 1}:", width=8, anchor="e").grid(
+                row=idx, column=0, padx=(8, 4), pady=2, sticky="e"
+            )
+            tk.Entry(nature_frame, textvariable=var, width=40).grid(
+                row=idx, column=1, padx=(0, 4), pady=2, sticky="ew"
+            )
+            tk.Button(
+                nature_frame, text="삭제", width=5,
+                command=(lambda i=idx: _delete_nature(i)),
+            ).grid(row=idx, column=2, padx=(0, 8), pady=2)
+
+    def _delete_nature(idx: int):
+        if len(nature_vars) <= 1:
+            messagebox.showwarning(
+                "최소 1개", "성격 컬럼은 최소 1개 이상이어야 합니다.", parent=dlg
+            )
+            return
+        del nature_vars[idx]
+        _render_nature_rows()
+
+    def _add_nature():
+        name = add_var.get().strip()
+        if not name:
+            messagebox.showwarning("입력 필요", "추가할 성격 컬럼 이름을 입력하세요.", parent=dlg)
+            return
+        if name in [v.get().strip() for v in nature_vars]:
+            messagebox.showwarning("중복", f"'{name}' 은(는) 이미 존재합니다.", parent=dlg)
+            return
+        nature_vars.append(tk.StringVar(value=name))
+        add_var.set("")
+        _render_nature_rows()
+
     label_vars: dict[tuple, tk.StringVar] = {}
     _r = 0
     for group_title, fields in _label_groups:
@@ -365,6 +404,30 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             )
             _r += 1
 
+        # 3-2 그룹 직후에 성격 컬럼 동적 편집 블록을 삽입한다.
+        if group_title == "3-2. 성격별 분류 결과":
+            tk.Label(
+                _lbl_inner, text="성격 컬럼 (CSV 컬럼명 = 표시명, 3-2 표)",
+                font=("맑은 고딕", 9, "bold"), anchor="w", fg="#2E2E38",
+            ).grid(row=_r, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 0))
+            _r += 1
+            tk.Label(
+                _lbl_inner,
+                text="※ CSV 컬럼명과 표시명에 동일하게 적용됩니다. "
+                     "사업비정보.csv에 없는 이름은 빈 칸으로 출력됩니다.",
+                font=("맑은 고딕", 8), anchor="w", fg="#c0392b",
+                wraplength=560, justify="left",
+            ).grid(row=_r, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
+            _r += 1
+            nature_frame.grid(row=_r, column=0, columnspan=2, sticky="w")
+            _r += 1
+            _render_nature_rows()
+            add_row = tk.Frame(_lbl_inner)
+            add_row.grid(row=_r, column=0, columnspan=2, sticky="w", padx=8, pady=(2, 6))
+            _r += 1
+            tk.Entry(add_row, textvariable=add_var, width=40).pack(side="left", padx=(0, 4))
+            tk.Button(add_row, text="+ 추가", width=6, command=_add_nature).pack(side="left")
+
     def _dl_set(path: tuple, value: str) -> None:
         cur = config["display_labels"]
         for k in path[:-1]:
@@ -378,6 +441,24 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
     btn_frame.grid(row=1, column=0, pady=(4, 12), padx=12)
 
     def _save_and_close():
+        # 0) 성격 컬럼 검증 — 실패 시 아무것도 저장하지 않고 대화상자를 유지한다.
+        new_nature = [v.get().strip() for v in nature_vars]
+        if not new_nature:
+            messagebox.showwarning(
+                "최소 1개", "성격 컬럼은 최소 1개 이상이어야 합니다.", parent=dlg
+            )
+            return
+        if any(not n for n in new_nature):
+            messagebox.showwarning(
+                "입력 오류", "비어 있는 성격 컬럼 이름이 있습니다.", parent=dlg
+            )
+            return
+        if len(set(new_nature)) != len(new_nature):
+            messagebox.showwarning(
+                "중복 오류", "성격 컬럼 이름이 중복됩니다.", parent=dlg
+            )
+            return
+
         valid_paths = [p for p in slots if p]
         new_theme = CompanyTheme(
             primary_hex=current_hex[0],
@@ -391,6 +472,9 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
         # 편집된 표시 문구를 config에 반영 후 column_config.yaml에 저장
         for path, var in label_vars.items():
             _dl_set(path, var.get())
+        # 성격 컬럼: nature_cols(CSV명) = display명 통합 리스트로 양쪽에 동일 반영
+        config["nature_cols"] = new_nature
+        config["display_labels"]["section3_2"]["nature_cols"] = list(new_nature)
         if not save_config(config):
             messagebox.showwarning(
                 "문구 저장 실패",
