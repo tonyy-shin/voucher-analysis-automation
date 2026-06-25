@@ -189,8 +189,8 @@ def _tbl_header(s: dict) -> Table:
 def _tbl_account(s: dict) -> Table:
     data = [
         [_P("Account", s["hdr_w"]), _P("Account Code", s["hdr_w"]),
-         _P("Account Name", s["hdr_w"]), _P("Group Code", s["hdr_w"]),
-         _P("Account Group Name", s["hdr_w"])],
+         _P("Account Name", s["hdr_w"]), _P("사업비 코드", s["hdr_w"]),
+         _P("채널구분", s["hdr_w"])],
         ["", "", "", "", ""],
     ]
     cmds = _base_style() + [
@@ -220,7 +220,7 @@ def _tbl_target(s: dict) -> list:
 def _tbl_dept(s: dict) -> list:
     # 헤더 2행 + 빈 데이터 2행 + 총계 행
     data = [
-        [_P("부점별<br/>(지역단별)<br/>귀속현황", s["hdr_w"]),
+        [_P("귀속현황", s["hdr_w"]),
          _P("주관부서 귀속", s["hdr_w"]), None, None,
          _P("실제 사용부서 귀속", s["hdr_w"]), None, None],
         [None,
@@ -260,7 +260,7 @@ def _tbl_nature_31(s: dict) -> list:
         ("BACKGROUND", (0, 1), (0, 2), _LIGHTBG),
         ("BACKGROUND", (1, 1), (1, 2), _WHITE),
     ]
-    return [_P("3. 부점별 성격분류", s["sec"]), Spacer(1, 2),
+    return [_P("3. 사업비 분류", s["sec"]), Spacer(1, 2),
             _P("3-1. 직접비 공통비 분류 결과", s["sec"]), Spacer(1, 2),
             Table(data, colWidths=_COLS_DI, rowHeights=[None, 16, 16], style=TableStyle(cmds))]
 
@@ -268,7 +268,7 @@ def _tbl_nature_31(s: dict) -> list:
 def _tbl_nature_32(s: dict) -> list:
     header_labels = NATURE_COLS + ["합계"]
     last_col = len(header_labels)
-    data = [[_P("부점별<br/>(지역단별)<br/>귀속현황", s["hdr_w"])]
+    data = [[_P("귀속현황", s["hdr_w"])]
             + [_P(c, s["hdr_w"]) for c in header_labels]]
     for _ in range(2):
         data.append([""] + ["" for _ in header_labels])
