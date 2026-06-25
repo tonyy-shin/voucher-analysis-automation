@@ -747,6 +747,12 @@ def main() -> None:
         )
         sys.exit(1)
 
+    # 설정된 성격 컬럼 중 사업비정보.csv에 실제로 없는 컬럼 (전 코드 공통 — 1회 계산)
+    unknown_nature = [
+        c for c in data_loader.NATURE_COLS
+        if c not in sheets[data_loader._SHEET_TRANSACTION].columns
+    ]
+
     # ── Step 5: 출력전표 코드 목록 수집 (출력.csv의 출력전표 컬럼에서) ──────────
     col_output_code = COLUMN_MAP["출력전표"]
     df_output = sheets[_SHEET_OUTPUT]
@@ -804,7 +810,7 @@ def main() -> None:
         successes.append(code_str)
 
     # ── Step 7: 완료 요약 ──────────────────────────────────────────────────
-    _show_summary_dialog(root, successes, errors, _unregistered)
+    _show_summary_dialog(root, successes, errors, _unregistered, unknown_nature)
 
 
 
@@ -813,9 +819,11 @@ def _show_summary_dialog(
     successes: list[str],
     errors: list[tuple[str, str]],
     unregistered: list[str],
+    unknown_nature: list[str],
 ) -> None:
     """PDF 일괄 생성 결과를 성공/경고/실패 섹션으로 구분하여 표시한다."""
-    n_warn = 1 if unregistered else 0
+    # 경고 '범주' 수 (미등록 팀 / 미등록 성격 컬럼)
+    n_warn = (1 if unregistered else 0) + (1 if unknown_nature else 0)
 
     win = tk.Toplevel(root)
     win.title("PDF 일괄 생성 결과")
@@ -846,6 +854,13 @@ def _show_summary_dialog(
         _write(f"\n  [미등록 팀 — 집계 누락 가능성]\n", "warning")
         for team in unregistered:
             _write(f"  • {team}\n", "warning")
+        _write("\n")
+
+    if unknown_nature:
+        _write(f"⚠️ 미등록 성격 컬럼 ({len(unknown_nature)}건)\n", "sec_bold", "warning")
+        _write("\n  [CSV에 없는 컬럼 — 해당 컬럼은 빈 칸으로 출력됩니다]\n", "warning")
+        for col in unknown_nature:
+            _write(f"  • {col}\n", "warning")
         _write("\n")
 
     if errors:
