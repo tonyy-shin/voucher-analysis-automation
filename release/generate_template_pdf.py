@@ -260,8 +260,7 @@ def _tbl_nature_31(s: dict) -> list:
         ("BACKGROUND", (0, 1), (0, 2), _LIGHTBG),
         ("BACKGROUND", (1, 1), (1, 2), _WHITE),
     ]
-    return [_P("3. 사업비 분류", s["sec"]), Spacer(1, 2),
-            _P("3-1. 직접비 공통비 분류 결과", s["sec"]), Spacer(1, 2),
+    return [_P("3-1. 직접비 공통비 분류 결과", s["sec"]), Spacer(1, 2),
             Table(data, colWidths=_COLS_DI, rowHeights=[None, 16, 16], style=TableStyle(cmds))]
 
 
