@@ -26,13 +26,16 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
-    BaseDocTemplate, Frame, NextPageTemplate, PageBreak, PageTemplate,
+    BaseDocTemplate, Frame, Image, NextPageTemplate, PageBreak, PageTemplate,
     Paragraph, Spacer, Table, TableStyle,
 )
 
+from PIL import Image as PILImage
+
 # ── 출력 경로 ─────────────────────────────────────────────────────────────────
 _HERE = Path(__file__).resolve().parent
-_OUT_PDF = _HERE / "사용설명서_v2.0.0.pdf"
+_OUT_PDF = _HERE / "사용설명서_v2.1.0.pdf"
+_SHOTS = _HERE / "screenshots"          # capture_screenshots.py 출력 폴더
 
 # ── EY Korea 브랜드 색상 ──────────────────────────────────────────────────────
 EY_YELLOW = colors.HexColor("#FFE600")   # 메인 (포인트)
@@ -40,6 +43,11 @@ EY_DARK   = colors.HexColor("#2E2E38")   # 텍스트/헤더 바
 EY_GRAY   = colors.HexColor("#747480")   # 서브 (표 헤더, 보조선)
 _WHITE    = colors.white
 _LIGHTBG  = colors.HexColor("#F4F4F6")   # 표 라벨 셀 배경(연회색)
+
+# ── 경고 박스 색상 ────────────────────────────────────────────────────────────
+_WARN_BG     = colors.HexColor("#FFF8E1")   # 연한 앰버 배경
+_WARN_BORDER = colors.HexColor("#E6A800")   # 경고 박스 테두리
+_WARN_RED    = colors.HexColor("#C0392B")   # 경고 제목(앱 경고 문구와 동일 톤)
 
 # ── 페이지 (A4 세로, 여백 20mm) ───────────────────────────────────────────────
 _PAGE   = A4
@@ -57,17 +65,20 @@ def _resolve_font_paths() -> tuple[Path | None, Path | None]:
         p = Path(env)
         return p, p
     home = Path.home()
+    _win_fonts = Path(r"C:\Windows\Fonts")
     regular_candidates = [
         home / ".fonts" / "NanumGothic-Regular.ttf",
         home / ".local/share/fonts" / "NanumGothic-Regular.ttf",
         Path("/usr/share/fonts/truetype/nanum/NanumGothic.ttf"),
         Path("/usr/share/fonts/nanum/NanumGothic.ttf"),
+        _win_fonts / "malgun.ttf",          # Windows 한글(맑은 고딕) 폴백
     ]
     bold_candidates = [
         home / ".fonts" / "NanumGothic-Bold.ttf",
         home / ".local/share/fonts" / "NanumGothic-Bold.ttf",
         Path("/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf"),
         Path("/usr/share/fonts/nanum/NanumGothicBold.ttf"),
+        _win_fonts / "malgunbd.ttf",        # Windows 한글 볼드 폴백
     ]
     reg = next((c for c in regular_candidates if c.exists()), None)
     bold = next((c for c in bold_candidates if c.exists()), None)
@@ -123,6 +134,12 @@ def build_styles(fn: str, fb: str) -> dict:
         "faq_a": ParagraphStyle("faq_a", fontName=fn, fontSize=9.5, leading=15,
                                 textColor=EY_DARK, leftIndent=10),
         "note": ParagraphStyle("note", fontName=fn, fontSize=8.5, leading=12, textColor=EY_GRAY),
+        "caption": ParagraphStyle("caption", fontName=fn, fontSize=8, leading=11,
+                                  textColor=EY_GRAY, alignment=TA_CENTER),
+        "warn_title": ParagraphStyle("warn_title", fontName=fb, fontSize=10, leading=14,
+                                     textColor=_WARN_RED),
+        "warn_body": ParagraphStyle("warn_body", fontName=fn, fontSize=9, leading=14,
+                                    textColor=EY_DARK),
     }
 
 
@@ -205,11 +222,64 @@ def gap(h: float = 6):
     return Spacer(1, h)
 
 
+def screenshot(name: str, caption: str, s: dict,
+               max_w: float = _WIDTH * 0.82, max_h: float = 92 * mm) -> list:
+    """release/screenshots/<name> 을 비율 유지로 축소하여 테두리 박스 + 캡션으로 반환한다.
+
+    파일이 없으면 빈 리스트를 반환하여, 스크린샷이 아직 생성되지 않아도 매뉴얼은
+    정상 빌드되도록 한다(capture_screenshots.py 미실행 시 안전).
+    """
+    p = _SHOTS / name
+    if not p.exists():
+        return []
+    try:
+        iw, ih = PILImage.open(p).size
+    except Exception:  # noqa: BLE001
+        return []
+    scale = min(max_w / iw, max_h / ih)
+    w, h = iw * scale, ih * scale
+    img = Image(str(p), width=w, height=h)
+    box = Table([[img]], colWidths=[w], hAlign="CENTER")
+    box.setStyle(TableStyle([
+        ("BOX",          (0, 0), (-1, -1), 0.5, EY_GRAY),
+        ("LEFTPADDING",  (0, 0), (-1, -1), 2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING",   (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 2),
+    ]))
+    out = [box]
+    if caption:
+        out.append(Paragraph(caption, s["caption"]))
+    return out
+
+
+def warn_box(title: str, body: str, s: dict) -> Table:
+    """노란 액센트 바 + 앰버 배경의 강조 경고 박스 (제목 빨강, 본문 다크)."""
+    cell = [Paragraph(f"[주의] {title}", s["warn_title"])]
+    if body:
+        cell.append(Spacer(1, 3))
+        cell.append(Paragraph(body, s["warn_body"]))
+    t = Table([["", cell]], colWidths=[5, _WIDTH - 5])
+    t.setStyle(TableStyle([
+        ("BACKGROUND",   (0, 0), (0, 0), EY_YELLOW),   # 좌측 액센트 바
+        ("BACKGROUND",   (1, 0), (1, 0), _WARN_BG),     # 본문 배경
+        ("BOX",          (1, 0), (1, 0), 0.6, _WARN_BORDER),
+        ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING",  (0, 0), (0, 0), 0),
+        ("RIGHTPADDING", (0, 0), (0, 0), 0),
+        ("LEFTPADDING",  (1, 0), (1, 0), 10),
+        ("RIGHTPADDING", (1, 0), (1, 0), 10),
+        ("TOPPADDING",   (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 8),
+    ]))
+    return t
+
+
 # ════════════════════════════════════════════════════════════════════════════
 #  페이지 데코레이션 (상/하단 바 — pdf_exporter 헤더/푸터 바 패턴)
 # ════════════════════════════════════════════════════════════════════════════
 
-_FOOTER_LEFT = "지급사업비 분석 자동화 프로그램 사용설명서 v2.0.0"
+_FOOTER_LEFT = "지급사업비 분석 자동화 프로그램 사용설명서 v2.1.0"
 _FOOTER_RIGHT = "© EY Korea"
 
 
@@ -262,7 +332,7 @@ def build_story(s: dict) -> list:
     story.append(Paragraph("Business Expense Statement Analysis — User Manual", s["cover_sub"]))
     story.append(gap(28))
     cover_meta = [
-        [Paragraph("버전", s["td_b"]), Paragraph("v2.0.0", s["td"])],
+        [Paragraph("버전", s["td_b"]), Paragraph("v2.1.0", s["td"])],
         [Paragraph("배포일", s["td_b"]), Paragraph("2026년 06월", s["td"])],
         [Paragraph("운영 체제", s["td_b"]), Paragraph("Windows 전용", s["td"])],
         [Paragraph("입력 형식", s["td_b"]), Paragraph("CSV 4개 파일 (UTF-8 / CP949)", s["td"])],
@@ -299,7 +369,10 @@ def build_story(s: dict) -> list:
         "<b>직접비/공통비 분류</b> — 부서정보.csv의 직간접구분('직접'/'공통') 기준으로 집계합니다.",
         "<b>성격별 분류(6종)</b> — 계약체결비·계약유지비·손해조사비·투자관리비·간접비·공통비를 부점별로 교차 집계합니다.",
         "<b>색상·로고 설정</b> — 포인트 색상 및 로고(최대 3슬롯, 슬롯별 높이 조절·실시간 미리보기).",
+        "<b>문구 설정 탭</b> — 테마 대화상자의 [문구 설정] 탭에서 PDF에 인쇄되는 모든 표시 문구(제목·라벨·헤더)를 직접 편집할 수 있습니다.",
+        "<b>성격 컬럼 추가/삭제</b> — [문구 설정] 탭에서 성격 분류 컬럼을 추가·삭제하며, 입력한 이름이 CSV 컬럼명과 PDF 표시명에 동시에 적용됩니다.",
         "<b>미등록 부서 사전 감지</b> — 출력.csv에 없는 부서를 처리 전에 경고합니다.",
+        "<b>미등록 성격 컬럼 경고</b> — 설정한 성격 컬럼이 사업비정보.csv에 없으면 최종 요약 창에 경고로 표시됩니다.",
         "<b>유연한 컬럼 설정</b> — column_config.yaml로 컬럼명을 외부에서 변경할 수 있습니다.",
     ], s))
 
@@ -307,6 +380,11 @@ def build_story(s: dict) -> list:
 
     # ── 2. 시작 전 준비사항 ──────────────────────────────────────────────
     story.append(section_title("2", "시작 전 준비사항", s))
+    story.append(gap(6))
+    story.append(warn_box(
+        "CSV 파일을 닫은 뒤 실행하세요",
+        "입력 CSV 4개 파일 중 하나라도 Excel 등 다른 프로그램에서 <b>열려 있는 상태</b>로 "
+        "프로그램을 실행하면 파일 접근 오류가 발생합니다. 실행 전 모든 CSV 파일을 닫아 주세요.", s))
     story.append(gap(6))
     story.append(subhead("2-1. 필요한 입력 파일 (CSV 4개)", s))
     story.append(body(
@@ -359,13 +437,19 @@ def build_story(s: dict) -> list:
     # ── 3. 실행 방법 ─────────────────────────────────────────────────────
     story.append(section_title("3", "실행 방법", s))
     story.append(gap(4))
+    story.append(warn_box(
+        "내려받은 직후에는 몇 초 기다린 뒤 실행하세요",
+        "Windows에서 EXE를 내려받은 직후 곧바로 실행하면 백신·운영체제의 보안 검사 때문에 "
+        "실행 오류가 발생할 수 있습니다. 다운로드 후 <b>몇 초 정도 기다린 뒤</b> 실행하면 안정적입니다.", s))
+    story.append(gap(6))
     story.append(body("<b>전표분석서_자동화.exe</b>를 더블클릭하여 실행합니다. 진행 순서는 다음과 같습니다.", s))
     story.append(gap(4))
 
     step_rows = [
         [Paragraph("Step 1", s["td_b"]),
-         Paragraph("<b>색상 및 로고 설정</b> — 포인트 색상 선택. 로고는 최대 3슬롯, 슬롯별 "
-                   "높이 슬라이더(16~96pt)와 하단 실시간 미리보기를 제공합니다. ('아니오' 시 저장된 색상으로 진행)", s["td"])],
+         Paragraph("<b>색상·로고·문구 설정</b> — 포인트 색상과 로고(최대 3슬롯, 높이 슬라이더 16~96pt·실시간 "
+                   "미리보기)를 설정하고, [문구 설정] 탭에서 PDF 표시 문구 편집 및 성격 컬럼 추가/삭제까지 "
+                   "할 수 있습니다. ('아니오' 시 저장된 설정으로 진행)", s["td"])],
         [Paragraph("Step 2", s["td_b"]),
          Paragraph("<b>CSV 파일 4개 선택</b> — 사업비정보 → 계정정보 → 부서정보 → 출력 순으로 "
                    "각각 지정합니다. 직전 실행 경로가 기본값으로 기억됩니다.", s["td"])],
@@ -378,13 +462,59 @@ def build_story(s: dict) -> list:
         [Paragraph("Step 5", s["td_b"]),
          Paragraph("<b>저장 폴더 선택</b> — 생성된 PDF를 저장할 폴더를 지정합니다.", s["td"])],
         [Paragraph("Step 6", s["td_b"]),
-         Paragraph("<b>PDF 생성 완료</b> — 코드별 PDF가 생성되고, 성공/경고/실패 건수 요약 창이 표시됩니다.", s["td"])],
+         Paragraph("<b>PDF 생성 완료</b> — 코드별 PDF가 생성되고, 성공/경고/실패 건수 요약 창이 표시됩니다. "
+                   "미등록 팀과 함께 <b>미등록 성격 컬럼</b>(사업비정보.csv에 없는 성격 컬럼)도 경고로 안내됩니다.", s["td"])],
     ]
     story.append(info_table(step_rows, s, [20 * mm, _WIDTH - 20 * mm], header=None))
     story.append(gap(4))
     story.append(Paragraph(
         "※ 참고: 미등록 부서를 무시하고 진행하면 해당 부서의 실적은 부점귀속·성격별 집계에서 "
         "제외됩니다. 정확한 결과가 필요하면 출력.csv에 부서를 추가한 뒤 재실행하십시오.", s["note"]))
+
+    story.append(gap(10))
+
+    # ── 3-7. 화면별 안내 (스크린샷) ───────────────────────────────────────
+    story.append(subhead("화면별 안내", s))
+    story.append(gap(4))
+
+    # Step 1 — 색상·로고·문구 설정
+    story.append(body("<b>Step 1. 색상·로고·문구 설정</b>", s))
+    story.append(gap(3))
+    story.extend(screenshot("01_brand_tab.png",
+                            "[브랜드 설정] 탭 — 포인트 색상 및 로고 슬롯(최대 3개) 설정", s))
+    story.append(gap(4))
+    story.extend(screenshot("02_labels_tab.png",
+                            "[문구 설정] 탭 — PDF에 인쇄되는 모든 표시 문구를 편집", s))
+    story.append(gap(4))
+    story.extend(screenshot("03_nature_cols.png",
+                            "[문구 설정] 탭 하단 — 성격 컬럼 추가/삭제 영역(CSV 컬럼명 = 표시명)", s))
+    story.append(gap(5))
+    story.append(warn_box(
+        "문구 설정의 성격 컬럼명은 CSV 컬럼명과 정확히 일치해야 합니다",
+        "[문구 설정] 탭에서 입력한 성격 컬럼명은 <b>사업비정보.csv의 컬럼 헤더와 글자·띄어쓰기까지 "
+        "동일</b>해야 합니다. 이름이 다르면 오류 없이 해당 컬럼이 <b>빈 칸으로 출력</b>되며, 최종 요약 "
+        "창에 '미등록 성격 컬럼' 경고로만 표시됩니다.", s))
+    story.append(gap(8))
+
+    # Step 2 — CSV 파일 선택
+    story.append(body("<b>Step 2. CSV 파일 4개 선택</b>", s))
+    story.append(gap(3))
+    story.extend(screenshot("04_file_select.png",
+                            "입력 파일 선택 — 사업비정보·계정정보·부서정보·출력 4개 CSV 지정", s))
+    story.append(gap(8))
+
+    # Step 4 — 미등록 부서 감지
+    story.append(body("<b>Step 4. 미등록 부서 감지</b>", s))
+    story.append(gap(3))
+    story.extend(screenshot("05_unregistered.png",
+                            "미등록 부서 감지 — [무시하고 진행] 또는 [종료 후 수정] 선택", s))
+    story.append(gap(8))
+
+    # Step 6 — 최종 요약
+    story.append(body("<b>Step 6. 최종 요약</b>", s))
+    story.append(gap(3))
+    story.extend(screenshot("06_summary.png",
+                            "PDF 일괄 생성 결과 — 성공/경고/실패 및 미등록 성격 컬럼 경고", s))
 
     story.append(gap(10))
 
@@ -425,6 +555,9 @@ def build_story(s: dict) -> list:
         "<b>직간접구분 값</b> — 부서정보.csv의 직간접구분 컬럼 값은 반드시 <b>\"직접\"</b> 또는 "
         "<b>\"공통\"</b> 중 하나여야 합니다. 다른 표기(예: 간접, 직접비용)는 분류되지 않습니다.",
         "<b>코드 일관성</b> — 원가요소·출력전표·코스트센터 코드는 파일 간 동일 표기를 유지하십시오.",
+        "<b>문구 설정의 성격 컬럼명</b> — [문구 설정] 탭에서 입력한 성격 컬럼명은 사업비정보.csv의 "
+        "컬럼 헤더와 정확히 일치시키십시오. 불일치 시 오류 없이 빈 칸으로 출력되고 요약 창에 경고만 "
+        "표시됩니다(3장 참고).",
         "<b>프로그램 구성 파일</b>(.exe, column_config.yaml의 논리명 등)을 임의로 수정·삭제하지 마십시오.",
     ], s))
     story.append(gap(3))
@@ -469,6 +602,10 @@ def build_story(s: dict) -> list:
     story.append(section_title("7", "변경 이력", s))
     story.append(gap(4))
     hist_rows = [
+        [Paragraph("v2.1.0", s["td_b"]), Paragraph("2026/06", s["td_c"]),
+         Paragraph("<b>문구 설정 탭</b> 추가(PDF 표시 문구 직접 편집); <b>성격 컬럼 동적 추가/삭제</b> "
+                   "(CSV명=표시명 통합); <b>미등록 성격 컬럼 경고</b>를 최종 요약 창에 표시; "
+                   "사용설명서에 화면 스크린샷 추가", s["td"])],
         [Paragraph("v2.0.0", s["td_b"]), Paragraph("2026/06", s["td_c"]),
          Paragraph("입력 형식을 엑셀(다중 시트)에서 <b>CSV 4개 파일</b>로 전환; 금액 소스를 "
                    "'합계' 컬럼으로 정리; 성격 분류 컬럼을 <b>6종</b>(계약체결비·계약유지비·손해조사비·"
@@ -481,7 +618,7 @@ def build_story(s: dict) -> list:
         header=["버전", "날짜", "주요 변경 내용"]))
     story.append(gap(8))
     story.append(Paragraph(
-        "본 설명서는 v2.0.0(현재 코드) 기준으로 작성되었습니다. © EY Korea", s["note"]))
+        "본 설명서는 v2.1.0(현재 코드) 기준으로 작성되었습니다. © EY Korea", s["note"]))
 
     return story
 
@@ -498,7 +635,7 @@ def main() -> None:
         str(_OUT_PDF), pagesize=_PAGE,
         leftMargin=_MARGIN, rightMargin=_MARGIN,
         topMargin=_MARGIN + 4 * mm, bottomMargin=_MARGIN,
-        title="지급사업비 분석 자동화 프로그램 사용설명서 v2.0.0",
+        title="지급사업비 분석 자동화 프로그램 사용설명서 v2.1.0",
         author="EY Korea",
     )
     frame = Frame(_MARGIN, _MARGIN, _WIDTH, _PAGE[1] - 2 * _MARGIN - 4 * mm,

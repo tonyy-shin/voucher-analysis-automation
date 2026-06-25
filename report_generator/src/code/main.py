@@ -594,6 +594,97 @@ def _show_file_select_dialog(root: tk.Tk) -> dict | None:
     return result[0]
 
 
+def show_unregistered_dialog(parent: tk.Tk, teams: list[str]) -> bool:
+    """미등록 부서 감지 경고 대화상자를 표시한다.
+
+    출력.csv에 등록되지 않은 부서 목록을 보여주고 사용자의 선택을 반환한다.
+    부수효과(root.destroy / sys.exit)는 호출부에서 처리하도록 분리한다.
+
+    Returns:
+        True:  '무시하고 진행' 선택 (집계 누락을 감수하고 계속)
+        False: '종료 후 수정' 또는 창 닫기 (프로그램을 종료해야 함)
+    """
+    _dept_lines = "\n".join(f"  {chr(8226)} {t}" for t in teams)
+    _proceed = False
+
+    dlg = tk.Toplevel(parent)
+    dlg.title("미등록 부서 감지")
+    dlg.resizable(False, False)
+
+    def _refocus(event=None):
+        dlg.focus_force()
+    dlg.bind("<FocusOut>", _refocus)
+    dlg.focus_force()
+
+    # 상단 안내 문구
+    _msg = (
+        "실제 발생 내역에 존재하지만 '출력.csv'에 등록되지 않은 부서가 발견되었습니다.\n"
+        "이대로 진행하면 해당 부서의 실적은 집계에서 누락됩니다."
+    )
+    tk.Label(
+        dlg,
+        text=_msg,
+        wraplength=440,
+        justify="left",
+        fg="#c0392b",
+        font=("Malgun Gothic", 10, "bold"),
+        padx=16, pady=14,
+    ).pack(fill="x")
+
+    # 스크롤 가능한 부서 목록
+    frame_list = tk.Frame(dlg, padx=16, pady=4)
+    frame_list.pack(fill="both", expand=True)
+
+    scrollbar = tk.Scrollbar(frame_list, orient="vertical")
+    txt = tk.Text(
+        frame_list,
+        height=10,
+        width=50,
+        yscrollcommand=scrollbar.set,
+        font=("Malgun Gothic", 10),
+        relief="sunken",
+        bd=1,
+    )
+    scrollbar.config(command=txt.yview)
+    scrollbar.pack(side="right", fill="y")
+    txt.pack(side="left", fill="both", expand=True)
+    txt.insert("1.0", _dept_lines)
+    txt.config(state="disabled")
+
+    # 하단 버튼
+    frame_btn = tk.Frame(dlg, padx=16, pady=12)
+    frame_btn.pack(fill="x")
+
+    def _on_exit() -> None:
+        dlg.destroy()
+
+    def _on_proceed() -> None:
+        nonlocal _proceed
+        _proceed = True
+        dlg.destroy()
+
+    dlg.protocol("WM_DELETE_WINDOW", _on_exit)
+
+    tk.Button(
+        frame_btn, text="종료 후 수정",
+        width=18, command=_on_exit,
+    ).pack(side="left", padx=(0, 8))
+    tk.Button(
+        frame_btn, text="무시하고 진행",
+        width=18, command=_on_proceed,
+    ).pack(side="left")
+
+    dlg.update_idletasks()
+    _w = dlg.winfo_reqwidth()
+    _h = dlg.winfo_reqheight()
+    _sw = dlg.winfo_screenwidth()
+    _sh = dlg.winfo_screenheight()
+    dlg.geometry(f"{_w}x{_h}+{(_sw - _w) // 2}+{(_sh - _h) // 2}")
+
+    parent.wait_window(dlg)
+    return _proceed
+
+
 def main() -> None:
     """
     프로그램 전체 흐름을 제어하는 메인 함수.
@@ -645,91 +736,8 @@ def main() -> None:
     # -- Step 1-C: 미등록 부서 사전 검증 (차단 또는 무시) --------------------
     _unregistered = data_loader.check_unregistered_teams(file_paths, config)
     if _unregistered:
-        _dept_lines = "\n".join(f"  {chr(8226)} {t}" for t in _unregistered)
-
-        _proceed = False
-
-        def _build_unregistered_dialog(parent: tk.Tk) -> None:
-            nonlocal _proceed
-            dlg = tk.Toplevel(parent)
-            dlg.title("미등록 부서 감지")
-            dlg.resizable(False, False)
-            def _refocus(event=None):
-                dlg.focus_force()
-            dlg.bind("<FocusOut>", _refocus)
-            dlg.focus_force()
-
-            # 상단 안내 문구
-            _msg = (
-                "실제 발생 내역에 존재하지만 '출력.csv'에 등록되지 않은 부서가 발견되었습니다.\n"
-                "이대로 진행하면 해당 부서의 실적은 집계에서 누락됩니다."
-            )
-            tk.Label(
-                dlg,
-                text=_msg,
-                wraplength=440,
-                justify="left",
-                fg="#c0392b",
-                font=("Malgun Gothic", 10, "bold"),
-                padx=16, pady=14,
-            ).pack(fill="x")
-
-            # 스크롤 가능한 부서 목록
-            frame_list = tk.Frame(dlg, padx=16, pady=4)
-            frame_list.pack(fill="both", expand=True)
-
-            scrollbar = tk.Scrollbar(frame_list, orient="vertical")
-            txt = tk.Text(
-                frame_list,
-                height=10,
-                width=50,
-                yscrollcommand=scrollbar.set,
-                font=("Malgun Gothic", 10),
-                relief="sunken",
-                bd=1,
-            )
-            scrollbar.config(command=txt.yview)
-            scrollbar.pack(side="right", fill="y")
-            txt.pack(side="left", fill="both", expand=True)
-            txt.insert("1.0", _dept_lines)
-            txt.config(state="disabled")
-
-            # 하단 버튼
-            frame_btn = tk.Frame(dlg, padx=16, pady=12)
-            frame_btn.pack(fill="x")
-
-            def _on_exit() -> None:
-                dlg.destroy()
-                root.destroy()
-                sys.exit(0)
-
-            def _on_proceed() -> None:
-                nonlocal _proceed
-                _proceed = True
-                dlg.destroy()
-
-            dlg.protocol("WM_DELETE_WINDOW", _on_exit)
-
-            tk.Button(
-                frame_btn, text="종료 후 수정",
-                width=18, command=_on_exit,
-            ).pack(side="left", padx=(0, 8))
-            tk.Button(
-                frame_btn, text="무시하고 진행",
-                width=18, command=_on_proceed,
-            ).pack(side="left")
-
-            dlg.update_idletasks()
-            _w = dlg.winfo_reqwidth()
-            _h = dlg.winfo_reqheight()
-            _sw = dlg.winfo_screenwidth()
-            _sh = dlg.winfo_screenheight()
-            dlg.geometry(f"{_w}x{_h}+{(_sw - _w) // 2}+{(_sh - _h) // 2}")
-
-            parent.wait_window(dlg)
-
-        _build_unregistered_dialog(root)
-        if not _proceed:
+        if not show_unregistered_dialog(root, _unregistered):
+            root.destroy()
             sys.exit(0)
 
     # ── Step 3: 데이터 로드 (Phase 0 클렌징 포함) ─────────────────────────
