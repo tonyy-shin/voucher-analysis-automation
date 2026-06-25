@@ -490,7 +490,6 @@ def _tbl_nature_31(di: dict, s: dict) -> list:
         ('BACKGROUND', (1, 1), (1, 2), colors.white),         # 값 셀: 흰색
     ]
     return [
-        _P('3. 사업비 분류', s['sec']),
         _P('3-1. 직접비 공통비 분류 결과', s['sec']),
         Table(data, colWidths=_COLS_DI, style=TableStyle(cmds)),
     ]
