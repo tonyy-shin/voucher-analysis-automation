@@ -385,8 +385,8 @@ def _tbl_header(s: dict, logo_max_height: int = 48,
 def _tbl_account(ai: dict, s: dict) -> Table:
     data = [
         [_P('Account', s['hdr']),      _P('Account Code', s['hdr']),
-         _P('Account Name', s['hdr']), _P('Group Code', s['hdr']),
-         _P('Account Group Name', s['hdr'])],
+         _P('Account Name', s['hdr']), _P('사업비 코드', s['hdr']),
+         _P('채널구분', s['hdr'])],
         ['',
          _P(ai.get('계정번호', ''), s['body']),
          _P(ai.get('계정명', ''),   s['body']),
@@ -425,7 +425,7 @@ def _tbl_dept(d주관: pd.DataFrame, d사용: pd.DataFrame, s: dict, fb: str) ->
 
     data = [
         # 행 0: 대분류 컬럼 헤더
-        [_P('부점별<br/>(지역단별)<br/>귀속현황', s['hdr']),
+        [_P('귀속현황', s['hdr']),
          _P('주관부서 귀속', s['hdr']), None, None,
          _P('실제 사용부서 귀속', s['hdr']), None, None],
         # 행 1: 소분류 컬럼 헤더
@@ -476,7 +476,7 @@ def _tbl_dept(d주관: pd.DataFrame, d사용: pd.DataFrame, s: dict, fb: str) ->
     return [title, desc, Table(data, colWidths=_COLS_7, style=TableStyle(cmds))]
 
 
-# ── [F] 3. 부점별 성격분류 + 3-1. 직접비/공통비 분류 결과 ────────────────────
+# ── [F] 3. 사업비 분류 + 3-1. 직접비/공통비 분류 결과 ────────────────────
 
 def _tbl_nature_31(di: dict, s: dict) -> list:
     data = [
@@ -490,7 +490,7 @@ def _tbl_nature_31(di: dict, s: dict) -> list:
         ('BACKGROUND', (1, 1), (1, 2), colors.white),         # 값 셀: 흰색
     ]
     return [
-        _P('3. 부점별 성격분류', s['sec']),
+        _P('3. 사업비 분류', s['sec']),
         _P('3-1. 직접비 공통비 분류 결과', s['sec']),
         Table(data, colWidths=_COLS_DI, style=TableStyle(cmds)),
     ]
@@ -506,7 +506,7 @@ def _tbl_nature_32(nat: pd.DataFrame, s: dict, fb: str) -> list:
 
     data = [
         # 행 0: 컬럼 헤더 (부점별 + NATURE 6종 + 합계 = 8열)
-        [_P('부점별<br/>(지역단별)<br/>귀속현황', s['hdr'])]
+        [_P('귀속현황', s['hdr'])]
         + [_P(c, s['hdr']) for c in _header_labels],
     ]
 
@@ -546,8 +546,8 @@ def _tbl_nature_32(nat: pd.DataFrame, s: dict, fb: str) -> list:
         cmds.append(('BACKGROUND', (0, first_data), (_last_col, last_data), colors.white))
 
     title = _P('3-2. 성격별 분류 결과', s['sec'])
-    desc  = _P(': 성격 분류는 직접비 및 공통비로 구분된 금액을 대상으로 '
-               '실제 사용부서의 업무 성격에 따라 분류한 결과.', s['small'])
+    desc  = _P(': 성격 분류는 직접비로 구분된 금액을 계정 성격에 따라 분류하며, '
+               '공통비로 구분된 금액은 귀속 부서 성격에 따라 공통부서에서 직접 부서로 순차적 배부됨.', s['small'])
     return [title, desc, Table(data, colWidths=_COLS_8, style=TableStyle(cmds))]
 
 
