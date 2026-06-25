@@ -386,9 +386,9 @@ def main() -> None:
     theme = load_theme()   # config 없거나 손상 시 GRAY_DEFAULT 자동 적용
     if messagebox.askyesno(
         "포인트 색상 설정",
-        "PDF 리포트의 포인트 색상을 변경하시겠습니까?\n\n"
+        "PDF 리포트의 포인트 색상 및 로고를 변경하시겠습니까?\n\n"
         f"현재 색상: {theme.primary_hex}\n"
-        "('아니오' 선택 시 현재 색상으로 바로 진행합니다.)",
+        "('아니오' 선택 시 현재 설정으로 바로 진행합니다.)",
     ):
         theme = _show_theme_dialog(root, theme)
 
