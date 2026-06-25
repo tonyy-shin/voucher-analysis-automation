@@ -116,8 +116,8 @@ amount_cols:                       # 10 amount columns (case-insensitive matchin
   # ...
 
 nature_cols:                       # 5 nature classification columns
-  - "계약비"
-  - "유지비"
+  - "계약체결비"
+  - "계약유지비"
   # ...
 ```
 

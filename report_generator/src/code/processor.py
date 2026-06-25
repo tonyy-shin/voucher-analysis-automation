@@ -37,8 +37,8 @@ def build_classification_basis(df_output: pd.DataFrame | None) -> dict[str, str]
     Returns:
         {"직접비_근거": str, "간접비_근거": str, ..., "투자관리비_근거": str}
     """
-    _KEYS = ["직접비_근거", "간접비_근거", "공통비_근거", "계약비_근거",
-             "유지비_근거", "손해조사비_근거", "투자관리비_근거"]
+    _KEYS = ["직접비_근거", "간접비_근거", "공통비_근거", "계약체결비_근거",
+             "계약유지비_근거", "손해조사비_근거", "투자관리비_근거"]
     if df_output is None or df_output.empty:
         return {k: "" for k in _KEYS}
 
@@ -398,7 +398,7 @@ def calc_nature_classification(
         df_output: 현재 keyword에 해당하는 출력> 행 (귀속_주관부서, 귀속_사용부서 포함)
 
     Returns:
-        컬럼: ['귀속_사용부서', '계약비', '유지비', '손해조사비', '투자관리비',
+        컬럼: ['귀속_사용부서', '계약체결비', '계약유지비', '손해조사비', '투자관리비',
                '간접비', '공통비', '소계']  (소계 = COL_SUBTOTAL)
         마지막 행: '귀속_사용부서' == '총계' 인 합산 행.
         대응되는 NATURE_COLS 컬럼이 없으면 빈 DataFrame 반환.
