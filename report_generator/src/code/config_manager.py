@@ -109,11 +109,17 @@ _DEFAULT_CONFIG: dict[str, Any] = {
                 "계약체결비", "계약유지비", "손해조사비", "투자관리비", "간접비", "공통비",
             ],
         },
+        # 섹션4 분류 근거는 타입별 동적 행 시스템.
+        #   - 직공통비   : cb의 직접비/공통비 근거로 렌더 (legacy 로직)
+        #   - 성격별분류 : nat 절댓값 합 필터링으로 렌더 (legacy 로직)
+        #   - custom     : csv_column 으로 지정한 출력.csv 컬럼의 첫 non-empty 값
+        # rows 는 "문구 설정" 탭에서 추가/삭제/편집되며, 행 삭제 시 PDF에서도 제거된다.
         "section4": {
             "제목": "4. 분류 근거",
-            "직공통비": "직 • 공통비",
-            "성격별분류": "성격별 분류",
-            "참조": "총괄문서 참조",
+            "rows": [
+                {"type": "직공통비",   "label": "직 • 공통비", "참조": "총괄문서 참조"},
+                {"type": "성격별분류", "label": "성격별 분류", "참조": "총괄문서 참조"},
+            ],
         },
     },
 }
@@ -165,6 +171,7 @@ def load_config() -> dict[str, Any]:
         loaded = yaml.safe_load(raw)
         if not isinstance(loaded, dict):
             return copy.deepcopy(_DEFAULT_CONFIG)
+        _discard_legacy_section4(loaded)
         return _deep_merge(_DEFAULT_CONFIG, loaded)
     except Exception:
         return copy.deepcopy(_DEFAULT_CONFIG)
@@ -254,8 +261,27 @@ def validate_csv_columns(file_paths: dict, config: dict[str, Any]) -> list[str]:
 #  Internal helpers
 # ════════════════════════════════════════════════════════════════════════════
 
+def _discard_legacy_section4(loaded: dict) -> None:
+    """구버전(플랫) section4 설정을 제거하여 기본 rows 구조로 폴백시킨다.
+
+    구버전 section4 는 "직공통비"/"성격별분류"/"참조" 같은 플랫 키만 가지며 "rows" 키가
+    없다. 이 경우 loaded에서 section4 를 통째로 삭제하여 _deep_merge가 기본값(_DEFAULT_CONFIG)의
+    rows 리스트를 그대로 사용하도록 한다. 병합(_deep_merge) 전에 호출되어야 한다.
+    """
+    dl = loaded.get("display_labels")
+    if not isinstance(dl, dict):
+        return
+    sec4 = dl.get("section4")
+    if isinstance(sec4, dict) and "rows" not in sec4:
+        del dl["section4"]
+
+
 def _deep_merge(base: dict, override: dict) -> dict:
-    """base에 override를 재귀적으로 병합한다. override 값이 우선한다."""
+    """base에 override를 재귀적으로 병합한다. override 값이 우선한다.
+
+    리스트(예: section4.rows, nature_cols)는 dict가 아니므로 else 분기로 빠져 override가
+    base를 통째로 대체한다. 인덱스 단위 병합은 하지 않는다.
+    """
     result = copy.deepcopy(base)
     for key, val in override.items():
         if key in result and isinstance(result[key], dict) and isinstance(val, dict):

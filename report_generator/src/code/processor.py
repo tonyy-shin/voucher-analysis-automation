@@ -21,36 +21,64 @@ from data_loader import (
 
 
 # ── 분류 근거 텍스트 — 출력.csv 전체에서 컬럼별 첫 non-empty 행으로 생성 ──────
-def build_classification_basis(df_output: pd.DataFrame | None) -> dict[str, str]:
-    """
-    출력.csv(df_output) 전체에서 BASIS_TEXT_COLS 컬럼별 분류 근거 dict를 생성한다.
+def _first_nonempty(df_output: pd.DataFrame, col: str) -> str:
+    """df_output[col] 전체에서 non-empty(NaN/""/nan/none/None 제외) 첫 값을 반환한다."""
+    if col not in df_output.columns:
+        return ""
+    series = df_output[col].dropna().astype(str).str.strip()
+    series = series[~series.isin(["", "nan", "none", "None"])]
+    return series.iloc[0] if not series.empty else ""
 
-    분류 근거 텍스트는 출력전표 코드별로 존재하지 않고, 컬럼당 파일 전체에서
-    텍스트가 채워진 첫 번째 행에만 들어있다. 따라서 특정 코드 행이 아니라
-    df_output 전체를 컬럼별로 훑어 non-empty(NaN/""/nan/none/None 제외) 첫 값을
-    "{컬럼}_근거" 키로 매핑한다. pdf_exporter._tbl_basis가 직•공통비 행과
-    성격별 분류 행에서 이 키들을 참조한다.
+
+def build_classification_basis(
+    df_output: pd.DataFrame | None,
+    basis_rows: list[dict],
+) -> dict[str, str]:
+    """
+    섹션4 분류 근거 dict를 생성한다 — legacy 키 + custom 키를 단일 dict로 병합 반환.
+
+    legacy(직공통비/성격별분류) 행은 BASIS_TEXT_COLS 컬럼별 첫 non-empty 텍스트를
+    "{컬럼}_근거" 키로 매핑한다(pdf_exporter._tbl_basis가 참조). 단, basis_rows에
+    type이 "직공통비" 또는 "성격별분류"인 행이 하나라도 있을 때만 legacy 키를 생성한다.
+
+    custom 행은 row["csv_column"]이 비어 있지 않고 df_output에 존재하면, 해당 컬럼
+    전체의 첫 non-empty 값을 cb[csv_column] 키로 저장한다.
 
     Args:
-        df_output: 출력.csv 전체 DataFrame (없거나 비어 있으면 빈 dict 반환)
+        df_output:  출력.csv 전체 DataFrame (없거나 비어 있으면 빈/빈값 dict 반환)
+        basis_rows: config display_labels.section4.rows (타입별 행 설정 리스트)
 
     Returns:
-        {"직접비_근거": str, "간접비_근거": str, ..., "투자관리비_근거": str}
+        {"직접비_근거": str, ...(legacy), <csv_column>: str, ...(custom)}
     """
-    _KEYS = ["직접비_근거", "간접비_근거", "공통비_근거", "계약체결비_근거",
-             "계약유지비_근거", "손해조사비_근거", "투자관리비_근거"]
-    if df_output is None or df_output.empty:
-        return {k: "" for k in _KEYS}
+    _LEGACY_KEYS = ["직접비_근거", "간접비_근거", "공통비_근거", "계약체결비_근거",
+                    "계약유지비_근거", "손해조사비_근거", "투자관리비_근거"]
+    rows = basis_rows or []
+    has_legacy = any(
+        r.get("type") in ("직공통비", "성격별분류") for r in rows
+    )
 
-    basis = {}
-    for col in BASIS_TEXT_COLS:
-        val = ""
-        if col in df_output.columns:
-            series = df_output[col].dropna().astype(str).str.strip()
-            series = series[~series.isin(["", "nan", "none", "None"])]
-            if not series.empty:
-                val = series.iloc[0]
-        basis[f"{col}_근거"] = val
+    empty_df = df_output is None or df_output.empty
+
+    basis: dict[str, str] = {}
+
+    # legacy 키 — 해당 타입 행이 존재할 때만 생성
+    if has_legacy:
+        if empty_df:
+            basis.update({k: "" for k in _LEGACY_KEYS})
+        else:
+            for col in BASIS_TEXT_COLS:
+                basis[f"{col}_근거"] = _first_nonempty(df_output, col)
+
+    # custom 키 — csv_column 으로 지정한 컬럼의 첫 non-empty 값
+    if not empty_df:
+        for r in rows:
+            if r.get("type") != "custom":
+                continue
+            csv_col = r.get("csv_column", "")
+            if csv_col and csv_col in df_output.columns:
+                basis[csv_col] = _first_nonempty(df_output, csv_col)
+
     return basis
 
 
@@ -529,6 +557,7 @@ def extract_account_info(df_enriched: pd.DataFrame) -> dict[str, object]:
 def run_pipeline(
     sheets: dict[str, pd.DataFrame],
     keyword: str,
+    basis_rows: list[dict] | None = None,
 ) -> dict[str, object]:
     """
     Phase 1 전체 파이프라인(Step 1~6)을 실행하고 결과를 dict로 반환한다.
@@ -537,8 +566,9 @@ def run_pipeline(
     편의 함수. 각 Step을 순서대로 실행하며 의존성을 유지한다.
 
     Args:
-        sheets:  data_loader.load_all_csvs()의 반환값
-        keyword: 사용자 입력 키워드
+        sheets:     data_loader.load_all_csvs()의 반환값
+        keyword:    사용자 입력 키워드
+        basis_rows: config display_labels.section4.rows (섹션4 분류 근거 행 설정)
 
     Returns:
         {
@@ -557,8 +587,8 @@ def run_pipeline(
     df_account = sheets[_SHEET_ACCOUNT]
     df_output  = sheets.get(_SHEET_OUTPUT, pd.DataFrame())
 
-    # ── 분류 근거: 출력.csv 전체에서 컬럼별 첫 non-empty 텍스트 추출 ──────────
-    classification_basis = build_classification_basis(df_output)
+    # ── 분류 근거: 섹션4 행 설정(basis_rows) 기준 legacy + custom 텍스트 추출 ──
+    classification_basis = build_classification_basis(df_output, basis_rows or [])
 
     # Step 1 — 필터링
     df_filtered = filter_by_keyword(df_actual, keyword)

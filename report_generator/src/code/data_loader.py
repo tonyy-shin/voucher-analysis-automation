@@ -430,8 +430,8 @@ def _preprocess_output(df: pd.DataFrame) -> pd.DataFrame:
     """
     출력.csv 전처리 — 평면 테이블이므로 헤더 위치 탐색 불필요.
 
-    출력전표/주관부서/사용부서 + 분류 근거 7컬럼을 그대로 보존하고
-    JOIN 키(출력전표) 형변환 및 텍스트 공백 제거만 수행한다.
+    모든 컬럼을 그대로 보존하고 JOIN 키(출력전표) 형변환 및 텍스트 공백 제거만 수행한다.
+    섹션4의 custom 행이 런타임에 임의의 컬럼명을 참조할 수 있으므로 컬럼을 선별 보존하지 않는다.
     """
     if df.empty:
         return df
@@ -441,13 +441,5 @@ def _preprocess_output(df: pd.DataFrame) -> pd.DataFrame:
     # 출력전표를 JOIN 키(원가요소)와 동일 규칙으로 형변환 (예: "5001.0" → "5001")
     df = cleanse_types(df, [COLUMN_MAP["출력전표"]])
     df = cleanse_whitespace(df)
-
-    # 필요 컬럼만 선택 — 분류 근거 7컬럼(BASIS_TEXT_COLS) 명시적 보존
-    _col_code = COLUMN_MAP["출력전표"]
-    _col_주관 = COLUMN_MAP["귀속_주관부서"]
-    _col_사용 = COLUMN_MAP["귀속_사용부서"]
-    keep_cols = [c for c in [_col_code, _col_주관, _col_사용] + BASIS_TEXT_COLS if c in df.columns]
-    if keep_cols:
-        df = df[keep_cols].copy()
 
     return df

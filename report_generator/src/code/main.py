@@ -8,6 +8,7 @@ main.py
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
 import sys
@@ -306,12 +307,8 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             (("section3_2", "합계"), "합계 헤더"),
             (("section3_2", "설명"), "설명 문구"),
         ]),
-        ("4. 분류 근거", [
-            (("section4", "제목"), "섹션 제목"),
-            (("section4", "직공통비"), "좌측 라벨 1 (직 • 공통비)"),
-            (("section4", "성격별분류"), "좌측 라벨 2 (성격별 분류)"),
-            (("section4", "참조"), "우측 참조 문구"),
-        ]),
+        # 4. 분류 근거는 정적 목록이 아닌 타입별 동적 행 편집기(_render_basis_rows)로
+        # 렌더링한다. 섹션4 "제목"은 config 값으로 고정되며 이 탭에서 편집하지 않는다.
     ]
 
     def _dl_get(path: tuple):
@@ -385,6 +382,80 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
         add_var.set("")
         _render_nature_rows()
 
+    # ── 섹션4 분류 근거(4) 동적 편집 상태 — 타입별 행 리스트 ──────────────────
+    basis_rows_state: list[dict] = copy.deepcopy(
+        config["display_labels"]["section4"].get("rows", [])
+    )
+    basis_vars: list[dict[str, tk.StringVar]] = []   # basis_rows_state와 인덱스 정렬
+    basis_frame = tk.Frame(_lbl_inner)               # _label_groups 루프 후 grid 됨
+
+    def _flush_basis_vars() -> None:
+        """현재 Entry StringVar 값들을 basis_rows_state로 반영한다 (재렌더 전 호출).
+
+        프레임을 부수고 다시 그리기 전에 호출하여 입력 중이던 값(라벨/CSV컬럼/참조)이
+        유실되지 않도록 한다.
+        """
+        for row, var_map in zip(basis_rows_state, basis_vars):
+            for key, var in var_map.items():
+                row[key] = var.get()
+
+    def _render_basis_rows():
+        for w in basis_frame.winfo_children():
+            w.destroy()
+        basis_vars.clear()
+        for idx, row in enumerate(basis_rows_state):
+            row_type = row.get("type", "custom")
+            rf = tk.Frame(basis_frame)
+            rf.grid(row=idx, column=0, sticky="w", padx=8, pady=2)
+            var_map: dict[str, tk.StringVar] = {}
+
+            tk.Label(rf, text=f"[{row_type}]", width=9, anchor="w",
+                     fg="#2E2E38").pack(side="left")
+
+            tk.Label(rf, text="라벨").pack(side="left", padx=(4, 2))
+            v_label = tk.StringVar(value=str(row.get("label", "")))
+            var_map["label"] = v_label
+            tk.Entry(rf, textvariable=v_label, width=14).pack(side="left")
+
+            if row_type == "custom":
+                tk.Label(rf, text="CSV컬럼").pack(side="left", padx=(4, 2))
+                v_csv = tk.StringVar(value=str(row.get("csv_column", "")))
+                var_map["csv_column"] = v_csv
+                tk.Entry(rf, textvariable=v_csv, width=12).pack(side="left")
+
+            tk.Label(rf, text="참조").pack(side="left", padx=(4, 2))
+            v_ref = tk.StringVar(value=str(row.get("참조", "")))
+            var_map["참조"] = v_ref
+            tk.Entry(rf, textvariable=v_ref, width=12).pack(side="left")
+
+            tk.Button(
+                rf, text="삭제", width=5,
+                command=(lambda i=idx: _delete_basis_row(i)),
+            ).pack(side="left", padx=(4, 0))
+
+            basis_vars.append(var_map)
+
+    def _delete_basis_row(idx: int):
+        _flush_basis_vars()
+        del basis_rows_state[idx]
+        _render_basis_rows()
+
+    def _add_basis_row(row_type: str):
+        _flush_basis_vars()
+        if row_type == "직공통비":
+            basis_rows_state.append(
+                {"type": "직공통비", "label": "직 • 공통비", "참조": "총괄문서 참조"}
+            )
+        elif row_type == "성격별분류":
+            basis_rows_state.append(
+                {"type": "성격별분류", "label": "성격별 분류", "참조": "총괄문서 참조"}
+            )
+        else:
+            basis_rows_state.append(
+                {"type": "custom", "label": "", "csv_column": "", "참조": "총괄문서 참조"}
+            )
+        _render_basis_rows()
+
     label_vars: dict[tuple, tk.StringVar] = {}
     _r = 0
     for group_title, fields in _label_groups:
@@ -428,6 +499,33 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             tk.Entry(add_row, textvariable=add_var, width=40).pack(side="left", padx=(0, 4))
             tk.Button(add_row, text="+ 추가", width=6, command=_add_nature).pack(side="left")
 
+    # ── 4. 분류 근거 동적 행 편집기 (정적 _label_groups 대신) ────────────────
+    tk.Label(
+        _lbl_inner, text="4. 분류 근거", font=("맑은 고딕", 10, "bold"),
+        anchor="w", fg="#2E2E38",
+    ).grid(row=_r, column=0, columnspan=2, sticky="w", padx=8, pady=(10, 2))
+    _r += 1
+    tk.Label(
+        _lbl_inner,
+        text="※ 직공통비/성격별분류 행은 기존 분류 로직을, custom 행은 출력.csv의 지정 컬럼 "
+             "첫 값을 사용합니다. 행을 삭제하면 PDF에서도 제외됩니다.",
+        font=("맑은 고딕", 8), anchor="w", fg="#c0392b",
+        wraplength=560, justify="left",
+    ).grid(row=_r, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
+    _r += 1
+    basis_frame.grid(row=_r, column=0, columnspan=2, sticky="w")
+    _r += 1
+    _render_basis_rows()
+    basis_add_row = tk.Frame(_lbl_inner)
+    basis_add_row.grid(row=_r, column=0, columnspan=2, sticky="w", padx=8, pady=(2, 8))
+    _r += 1
+    tk.Button(basis_add_row, text="+ 직공통비 추가",
+              command=lambda: _add_basis_row("직공통비")).pack(side="left", padx=(0, 4))
+    tk.Button(basis_add_row, text="+ 성격별분류 추가",
+              command=lambda: _add_basis_row("성격별분류")).pack(side="left", padx=(0, 4))
+    tk.Button(basis_add_row, text="+ 커스텀 행 추가",
+              command=lambda: _add_basis_row("custom")).pack(side="left")
+
     def _dl_set(path: tuple, value: str) -> None:
         cur = config["display_labels"]
         for k in path[:-1]:
@@ -459,6 +557,22 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             )
             return
 
+        # 0-1) 섹션4 분류 근거 행 검증 — 입력 중인 값을 먼저 반영한 뒤 검사한다.
+        _flush_basis_vars()
+        for row in basis_rows_state:
+            if not str(row.get("label", "")).strip():
+                messagebox.showwarning(
+                    "입력 오류", "분류 근거 행의 라벨은 비울 수 없습니다.", parent=dlg
+                )
+                return
+            if row.get("type") == "custom" and not str(row.get("csv_column", "")).strip():
+                messagebox.showwarning(
+                    "입력 오류",
+                    "커스텀 분류 근거 행에는 CSV 컬럼명을 입력해야 합니다.",
+                    parent=dlg,
+                )
+                return
+
         valid_paths = [p for p in slots if p]
         new_theme = CompanyTheme(
             primary_hex=current_hex[0],
@@ -475,6 +589,8 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
         # 성격 컬럼: nature_cols(CSV명) = display명 통합 리스트로 양쪽에 동일 반영
         config["nature_cols"] = new_nature
         config["display_labels"]["section3_2"]["nature_cols"] = list(new_nature)
+        # 섹션4 분류 근거 행 설정 반영
+        config["display_labels"]["section4"]["rows"] = basis_rows_state
         if not save_config(config):
             messagebox.showwarning(
                 "문구 저장 실패",
@@ -786,7 +902,8 @@ def main() -> None:
         code_str = str(code).strip()
 
         try:
-            results = processor.run_pipeline(sheets, code_str)
+            basis_rows = config.get("display_labels", {}).get("section4", {}).get("rows", [])
+            results = processor.run_pipeline(sheets, code_str, basis_rows=basis_rows)
         except ValueError as exc:
             errors.append((code_str, str(exc)))
             continue

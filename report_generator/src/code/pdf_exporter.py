@@ -571,45 +571,65 @@ def _tbl_nature_32(nat: pd.DataFrame, s: dict, fb: str) -> list:
 # ── [H] 4. 분류 근거 ───────────────────────────────────────────────────────────
 
 def _tbl_basis(cb: dict, di: dict, nat: pd.DataFrame, s: dict) -> list:
-    # 직·공통비: 출력.csv의 직접비/공통비 근거 중 텍스트가 채워진 항목만 "{구분}: {텍스트}" 형식으로 포함
-    di_parts = []
-    for k in ('직접비', '공통비'):
-        t = cb.get(f'{k}_근거', '').strip()
-        if t:
-            di_parts.append(f'{k}: {t}')
-    직공통비_text = '<br/><br/>'.join(di_parts)
-
-    # 성격별 분류: 부점 데이터 행(총계 행 제외) 기준 절댓값 합이 0이 아니고
-    # 근거 텍스트가 있는 항목만 "{성격}: {텍스트}" 형식으로 포함.
-    # 총계 Net값이 0이더라도 상계된 부점이 존재하면 근거를 출력해야 하므로 절댓값 합으로 판단한다.
-    nat_parts = []
-    if not nat.empty:
-        dept_rows = nat[nat[COLUMN_MAP['귀속_사용부서']] != COL_TOTAL]
-        for col in NATURE_COLS:
-            if col not in nat.columns:
-                continue
-            abs_sum = pd.to_numeric(dept_rows[col], errors='coerce').abs().sum()
-            txt = cb.get(f'{col}_근거', '').strip()
-            if abs_sum > 0 and txt:
-                nat_parts.append(f'{col}: {txt}')
-    성격별_text = '<br/><br/>'.join(nat_parts)
-
+    # 타입별 동적 행 렌더러 — config display_labels.section4.rows 기준.
+    #   직공통비   : cb의 직접비/공통비 근거 (legacy 로직)
+    #   성격별분류 : 부점 데이터 절댓값 합 필터링 (legacy 로직)
+    #   custom     : cb[csv_column] (필터링 없음)
+    # 행이 삭제되면 PDF에서도 제외된다. 모든 행이 삭제되면 제목만 출력한다.
     L = s['labels']['section4']
-    data = [
-        [_P(L['직공통비'], s['bold']),
-         _P(직공통비_text, s['body']),
-         _P(L['참조'], s['center'])],
-        [_P(L['성격별분류'], s['bold']),
-         _P(성격별_text, s['body']),
-         _P(L['참조'], s['center'])],
-    ]
+    rows_cfg = L.get('rows', [])
+
+    data = []
+    for row_cfg in rows_cfg:
+        row_type = row_cfg.get('type', 'custom')
+        label    = row_cfg.get('label', '')
+        참조_text = row_cfg.get('참조', '')
+
+        if row_type == '직공통비':
+            # 출력.csv의 직접비/공통비 근거 중 텍스트가 채워진 항목만 "{구분}: {텍스트}" 형식
+            di_parts = []
+            for k in ('직접비', '공통비'):
+                t = cb.get(f'{k}_근거', '').strip()
+                if t:
+                    di_parts.append(f'{k}: {t}')
+            content = '<br/><br/>'.join(di_parts)
+
+        elif row_type == '성격별분류':
+            # 부점 데이터 행(총계 행 제외) 기준 절댓값 합이 0이 아니고 근거 텍스트가 있는 항목만 포함.
+            # 총계 Net값이 0이더라도 상계된 부점이 존재하면 근거를 출력해야 하므로 절댓값 합으로 판단한다.
+            nat_parts = []
+            if not nat.empty:
+                dept_rows = nat[nat[COLUMN_MAP['귀속_사용부서']] != COL_TOTAL]
+                for col in NATURE_COLS:
+                    if col not in nat.columns:
+                        continue
+                    abs_sum = pd.to_numeric(dept_rows[col], errors='coerce').abs().sum()
+                    txt = cb.get(f'{col}_근거', '').strip()
+                    if abs_sum > 0 and txt:
+                        nat_parts.append(f'{col}: {txt}')
+            content = '<br/><br/>'.join(nat_parts)
+
+        else:
+            csv_col = row_cfg.get('csv_column', '')
+            content = cb.get(csv_col, '')
+
+        data.append([
+            _P(label,     s['bold']),
+            _P(content,   s['body']),
+            _P(참조_text, s['center']),
+        ])
+
+    if not data:
+        return [_P(L['제목'], s['sec'])]
+
+    n = len(data)
     cmds = _base_style() + [
-        ('BACKGROUND', (0, 0), (0, 1), s['c_primary']),   # 좌측 라벨
-        ('BACKGROUND', (1, 0), (1, 1), colors.white),     # 중간 입력 셀: 흰색
-        ('BACKGROUND', (2, 0), (2, 1), colors.white),  # 우측 참조: 흰색
-        ('ALIGN',      (0, 0), (0, 1), 'CENTER'),
-        ('ALIGN',      (2, 0), (2, 1), 'CENTER'),
-        ('ROWHEIGHT',  (0, 0), (0, 1), 30),            # 입력 행 여유 높이
+        ('BACKGROUND', (0, 0), (0, n - 1), s['c_primary']),   # 좌측 라벨
+        ('BACKGROUND', (1, 0), (1, n - 1), colors.white),     # 중간 입력 셀: 흰색
+        ('BACKGROUND', (2, 0), (2, n - 1), colors.white),     # 우측 참조: 흰색
+        ('ALIGN',      (0, 0), (0, n - 1), 'CENTER'),
+        ('ALIGN',      (2, 0), (2, n - 1), 'CENTER'),
+        ('ROWHEIGHT',  (0, 0), (-1, -1),   30),               # 입력 행 여유 높이
     ]
     return [_P(L['제목'], s['sec']), Table(data, colWidths=_COLS_BASIS, style=TableStyle(cmds))]
 
