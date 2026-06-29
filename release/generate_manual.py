@@ -1,6 +1,6 @@
 """
 generate_manual.py
-역할: 지급사업비 분석 자동화 프로그램 사용설명서(v2.0.0) PDF를 생성한다.
+역할: 지급사업비 분석 자동화 프로그램 사용설명서(v2.2.0) PDF를 생성한다.
 
 기존 pdf_exporter.py의 PDF 생성 패턴(ReportLab Platypus, A4 세로, NanumGothic TTF 등록,
 상/하단 색상 바)을 재사용하되, EY Korea 브랜드 색상과 20mm 여백을 적용한다.
@@ -9,7 +9,7 @@ generate_manual.py
       /usr/share/fonts/truetype/nanum. 모두 실패 시 Helvetica 폴백(한글 깨짐 경고).
 
 실행:  python3 generate_manual.py
-출력:  release/사용설명서_v2.0.0.pdf
+출력:  release/사용설명서_v2.2.0.pdf
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ from PIL import Image as PILImage
 
 # ── 출력 경로 ─────────────────────────────────────────────────────────────────
 _HERE = Path(__file__).resolve().parent
-_OUT_PDF = _HERE / "사용설명서_v2.1.0.pdf"
+_OUT_PDF = _HERE / "사용설명서_v2.2.0.pdf"
 _SHOTS = _HERE / "screenshots"          # capture_screenshots.py 출력 폴더
 
 # ── EY Korea 브랜드 색상 ──────────────────────────────────────────────────────
@@ -279,7 +279,7 @@ def warn_box(title: str, body: str, s: dict) -> Table:
 #  페이지 데코레이션 (상/하단 바 — pdf_exporter 헤더/푸터 바 패턴)
 # ════════════════════════════════════════════════════════════════════════════
 
-_FOOTER_LEFT = "지급사업비 분석 자동화 프로그램 사용설명서 v2.1.0"
+_FOOTER_LEFT = "지급사업비 분석 자동화 프로그램 사용설명서 v2.2.0"
 _FOOTER_RIGHT = "© EY Korea"
 
 
@@ -332,7 +332,7 @@ def build_story(s: dict) -> list:
     story.append(Paragraph("Business Expense Statement Analysis — User Manual", s["cover_sub"]))
     story.append(gap(28))
     cover_meta = [
-        [Paragraph("버전", s["td_b"]), Paragraph("v2.1.0", s["td"])],
+        [Paragraph("버전", s["td_b"]), Paragraph("v2.2.0", s["td"])],
         [Paragraph("배포일", s["td_b"]), Paragraph("2026년 06월", s["td"])],
         [Paragraph("운영 체제", s["td_b"]), Paragraph("Windows 전용", s["td"])],
         [Paragraph("입력 형식", s["td_b"]), Paragraph("CSV 4개 파일 (UTF-8 / CP949)", s["td"])],
@@ -417,7 +417,7 @@ def build_story(s: dict) -> list:
          Paragraph("—", s["td_c"])],
         [Paragraph("출력.csv", s["td_b"]),
          Paragraph("출력전표", s["td"]),
-         Paragraph("주관부서·사용부서·(분류 근거 7컬럼)", s["td"])],
+         Paragraph("주관부서·사용부서·(분류 근거 텍스트 컬럼)·(참조문서 컬럼: 예) 참조문서1·참조문서2)", s["td"])],
     ]
     story.append(info_table(
         req_rows, s,
@@ -496,6 +496,41 @@ def build_story(s: dict) -> list:
         "창에 '미등록 성격 컬럼' 경고로만 표시됩니다.", s))
     story.append(gap(8))
 
+    # 분류 근거(섹션 4) 행 설정 ──────────────────────────────────────────────
+    story.append(subhead("분류 근거(섹션 4) 행 설정", s))
+    story.append(gap(3))
+    story.append(body(
+        "PDF의 <b>4. 분류 근거</b> 표는 [문구 설정] 탭에서 <b>행 단위로 추가·삭제</b>할 수 있는 동적 "
+        "구성입니다. 각 행은 아래 <b>세 가지 타입</b> 중 하나이며, [행 추가] 버튼으로 타입을 골라 "
+        "추가하고 각 행의 [삭제] 버튼으로 제거합니다. 행을 삭제하면 PDF에서도 해당 행이 사라집니다.", s))
+    story.append(gap(4))
+    story.extend(screenshot(
+        "07_basis_rows.png",
+        "[문구 설정] 탭 — 분류 근거(섹션 4) 동적 행 편집기: 근거 텍스트 컬럼·참조문서 컬럼 입력과 "
+        "행 타입별 추가 버튼(직공통비/성격별분류/커스텀)", s))
+    story.append(gap(5))
+    type_rows = [
+        [Paragraph("직공통비", s["td_b"]),
+         Paragraph("출력.csv의 직접비/공통비 근거 텍스트를 자동으로 모아 표시합니다(금액 0원 항목 제외).", s["td"])],
+        [Paragraph("성격별분류", s["td_b"]),
+         Paragraph("성격별(계약체결비·계약유지비 등) 근거 텍스트를 부점 금액 기준으로 모아 표시합니다.", s["td"])],
+        [Paragraph("custom", s["td_b"]),
+         Paragraph("<b>근거 텍스트 컬럼</b>에 적은 출력.csv 컬럼의 값을 그대로 내용 칸에 표시합니다.", s["td"])],
+    ]
+    story.append(info_table(type_rows, s, [28 * mm, _WIDTH - 28 * mm], header=["행 타입", "내용 칸 채우는 방식"]))
+    story.append(gap(5))
+    story.extend(bullets([
+        "<b>근거 텍스트 컬럼</b> (custom 행 전용) — 내용 칸을 채울 출력.csv 컬럼명을 적습니다. "
+        "출력.csv의 컬럼 헤더와 <b>글자·띄어쓰기까지 정확히 일치</b>해야 하며, 해당 컬럼의 첫 값이 표시됩니다.",
+        "<b>참조문서 컬럼</b> (모든 행 공통) — 표 오른쪽 참조 칸을 채울 출력.csv 컬럼명을 적습니다. "
+        "마찬가지로 컬럼 헤더와 정확히 일치해야 하며, <b>비워 두면 참조 칸이 빈 칸으로 출력</b>됩니다. "
+        "지정한 컬럼이 출력.csv에 없거나 값이 비어 있어도 오류 없이 빈 칸으로 표시됩니다.",
+        "<b>출력.csv에 컬럼 추가</b> — 위 두 필드에서 사용할 컬럼은 출력.csv 첫 줄(헤더)에 이름을 "
+        "추가하고, 출력전표 코드별 행에 값을 채우면 됩니다(예: 참조문서1, 참조문서2). 동봉된 "
+        "templates/ 폴더의 출력.csv 양식에 예시 컬럼이 포함되어 있습니다.",
+    ], s))
+    story.append(gap(8))
+
     # Step 2 — CSV 파일 선택
     story.append(body("<b>Step 2. CSV 파일 4개 선택</b>", s))
     story.append(gap(3))
@@ -539,7 +574,9 @@ def build_story(s: dict) -> list:
                    "공통비로 구분된 금액은 귀속 부서 성격에 따라 공통부서에서 직접 부서로 "
                    "순차적 배부됨.", s["td"])],
         [Paragraph("4. 분류 근거", s["td_b"]),
-         Paragraph("출력.csv의 직접비/공통비·성격별 근거 텍스트(금액 0원 항목은 제외)", s["td"])],
+         Paragraph("타입별 동적 행(직공통비·성격별분류·custom)으로 구성. 각 행의 내용은 출력.csv "
+                   "값에서 채워지며, 참조 칸은 행마다 지정한 <b>참조문서 컬럼</b>의 값으로 표시됩니다"
+                   "(컬럼이 없거나 비어 있으면 빈 칸). 자세한 설정은 3장의 '분류 근거(섹션 4) 행 설정' 참고.", s["td"])],
     ]
     story.append(info_table(pdf_rows, s, [32 * mm, _WIDTH - 32 * mm], header=None))
 
@@ -602,6 +639,11 @@ def build_story(s: dict) -> list:
     story.append(section_title("7", "변경 이력", s))
     story.append(gap(4))
     hist_rows = [
+        [Paragraph("v2.2.0", s["td_b"]), Paragraph("2026/06", s["td_c"]),
+         Paragraph("<b>분류 근거(섹션 4) 동적 행 편집</b> 추가(직공통비·성격별분류·custom 타입 행 "
+                   "추가/삭제); <b>참조 셀 데이터 연동</b> — 행마다 지정한 출력.csv '참조문서 컬럼' "
+                   "값으로 참조 칸을 채움(미지정·빈 값이면 빈 칸); <b>문구 설정 탭 라벨 개선</b> "
+                   "('근거 텍스트 컬럼', '참조문서 컬럼')", s["td"])],
         [Paragraph("v2.1.0", s["td_b"]), Paragraph("2026/06", s["td_c"]),
          Paragraph("<b>문구 설정 탭</b> 추가(PDF 표시 문구 직접 편집); <b>성격 컬럼 동적 추가/삭제</b> "
                    "(CSV명=표시명 통합); <b>미등록 성격 컬럼 경고</b>를 최종 요약 창에 표시; "
@@ -618,7 +660,7 @@ def build_story(s: dict) -> list:
         header=["버전", "날짜", "주요 변경 내용"]))
     story.append(gap(8))
     story.append(Paragraph(
-        "본 설명서는 v2.1.0(현재 코드) 기준으로 작성되었습니다. © EY Korea", s["note"]))
+        "본 설명서는 v2.2.0(현재 코드) 기준으로 작성되었습니다. © EY Korea", s["note"]))
 
     return story
 
@@ -635,7 +677,7 @@ def main() -> None:
         str(_OUT_PDF), pagesize=_PAGE,
         leftMargin=_MARGIN, rightMargin=_MARGIN,
         topMargin=_MARGIN + 4 * mm, bottomMargin=_MARGIN,
-        title="지급사업비 분석 자동화 프로그램 사용설명서 v2.1.0",
+        title="지급사업비 분석 자동화 프로그램 사용설명서 v2.2.0",
         author="EY Korea",
     )
     frame = Frame(_MARGIN, _MARGIN, _WIDTH, _PAGE[1] - 2 * _MARGIN - 4 * mm,

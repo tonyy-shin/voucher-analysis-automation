@@ -42,6 +42,14 @@ from config_manager import load_config                        # noqa: E402
 
 _OPEN_DELAY_MS = 800   # 다이얼로그가 그려질 시간을 준 뒤 캡처 드라이버 실행
 
+# 파일 선택 다이얼로그 스크린샷(04)에 실제 사용자명이 노출되지 않도록 사용하는 익명 더미 경로
+_DUMMY_PATHS = {
+    "transaction": "C:/data/사업비정보.csv",
+    "account":     "C:/data/계정정보.csv",
+    "ccm":         "C:/data/부서정보.csv",
+    "output":      "C:/data/출력.csv",
+}
+
 
 # ── 공통 유틸 ─────────────────────────────────────────────────────────────────
 
@@ -71,6 +79,42 @@ def _find_descendant(widget, cls):
         if found is not None:
             return found
     return None
+
+
+def _find_all(widget, cls) -> list:
+    """widget 하위 트리에서 cls 인스턴스를 깊이우선 순서로 모두 수집한다."""
+    out = []
+    for child in widget.winfo_children():
+        if isinstance(child, cls):
+            out.append(child)
+        out.extend(_find_all(child, cls))
+    return out
+
+
+def _find_label_startswith(widget, prefix: str):
+    """text가 prefix로 시작하는 첫 tk.Label을 재귀 탐색하여 반환한다(없으면 None)."""
+    for child in widget.winfo_children():
+        if isinstance(child, tk.Label):
+            try:
+                if str(child.cget("text")).startswith(prefix):
+                    return child
+            except tk.TclError:
+                pass
+        found = _find_label_startswith(child, prefix)
+        if found is not None:
+            return found
+    return None
+
+
+def _scroll_to_widget(canvas: tk.Canvas, inner: tk.Frame, target) -> None:
+    """스크롤 캔버스에서 target 위젯이 보이도록 yview를 이동한다(target을 상단 근처에)."""
+    canvas.update_idletasks()
+    total = inner.winfo_height()
+    if total <= 0:
+        return
+    rel_y = target.winfo_rooty() - inner.winfo_rooty()
+    frac = max(0.0, min(1.0, rel_y / total))
+    canvas.yview_moveto(frac)
 
 
 def _settle(win, ms: int = 250) -> None:
@@ -142,17 +186,28 @@ def _capture_theme(root: tk.Tk, theme, config) -> None:
         # 2) 문구 설정 탭 (상단)
         nb.select(tabs[1]); _settle(dlg)
         canvas = _find_descendant(nb.nametowidget(tabs[1]), tk.Canvas)
+        inner = _find_descendant(canvas, tk.Frame) if canvas is not None else None
         if canvas is not None:
             canvas.update_idletasks()
             canvas.yview_moveto(0.0)
         _settle(dlg)
         _grab(dlg, _OUT_DIR / "02_labels_tab.png")
 
-        # 3) 성격 컬럼 추가/삭제 영역 (하단으로 스크롤)
+        # 3) 성격 컬럼 추가/삭제 영역 (해당 블록으로 스크롤)
+        if canvas is not None:
+            lbl = _find_label_startswith(inner, "성격 컬럼") if inner is not None else None
+            if inner is not None and lbl is not None:
+                _scroll_to_widget(canvas, inner, lbl)
+            else:
+                canvas.yview_moveto(1.0)
+        _settle(dlg)
+        _grab(dlg, _OUT_DIR / "03_nature_cols.png")
+
+        # 4) 분류 근거(섹션 4) 동적 행 편집기 (탭 최하단으로 스크롤)
         if canvas is not None:
             canvas.yview_moveto(1.0)
         _settle(dlg)
-        _grab(dlg, _OUT_DIR / "03_nature_cols.png")
+        _grab(dlg, _OUT_DIR / "07_basis_rows.png")
 
         dlg.destroy()   # wait_window 해제 (저장 안 함 = 부수효과 없음)
 
@@ -161,15 +216,42 @@ def _capture_theme(root: tk.Tk, theme, config) -> None:
 
 
 def _capture_file_select(root: tk.Tk) -> None:
+    # 익명화: 스크린샷에 실제 사용자명이 담긴 경로가 보이지 않도록 더미 경로를 표시한다.
+    #   1) last_paths.json 을 더미 경로로 임시 덮어쓴 뒤(요청사항), finally에서 원복한다.
+    #   2) 다만 다이얼로그는 존재하는 파일 경로만 표시하므로(main._show_file_select_dialog의
+    #      Path(saved).is_file() 가드), 캡처 직전 읽기전용 Entry 4칸 텍스트를 더미 경로로 직접
+    #      세팅하여 안정적으로 노출시킨다.
+    path = app._LAST_PATHS_FILE
+    state = (path, path.read_text(encoding="utf-8") if path.exists() else None)
+
     def driver() -> None:
         dlg = _latest_toplevel(root)
         if dlg is None:
             print("[warn] file-select dialog not found"); return
+        entries = _find_all(dlg, tk.Entry)
+        keys = [k for k, _ in app._FILE_SELECT_ROWS]
+        for entry, key in zip(entries, keys):
+            try:
+                entry.config(state="normal")
+                entry.delete(0, "end")
+                entry.insert(0, _DUMMY_PATHS[key])
+                entry.config(state="readonly")
+            except tk.TclError:
+                pass
         _grab(dlg, _OUT_DIR / "04_file_select.png")
         dlg.destroy()
 
-    root.after(_OPEN_DELAY_MS, driver)
-    app._show_file_select_dialog(root)
+    try:
+        try:
+            path.write_text(
+                json.dumps(_DUMMY_PATHS, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except OSError:
+            pass
+        root.after(_OPEN_DELAY_MS, driver)
+        app._show_file_select_dialog(root)
+    finally:
+        _restore_last_paths(state)
 
 
 def _capture_unregistered(root: tk.Tk) -> None:

@@ -38,5 +38,5 @@ _fix_*.py
 
 # ── 사용 설명서 ──────────────────────────
 \사용_설명서
-\release
-\images
+images
+release

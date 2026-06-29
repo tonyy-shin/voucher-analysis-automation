@@ -2,7 +2,7 @@
 
 A Windows tool that auto-generates **Business Expense Statement Analysis PDFs** in bulk from Excel source data (expense pivot tables), one PDF per output code.
 
-**Version:** v2.1.0 (2026/06)
+**Version:** v2.2.0 (2026/06)
 
 ---
 
@@ -21,6 +21,7 @@ A Windows tool that auto-generates **Business Expense Statement Analysis PDFs** 
 - **문구 설정 탭 (Display-label editing tab)** — A second tab in the theme dialog where every PDF display label (titles, headers, section labels) can be edited from a scrollable form
 - **성격 컬럼 동적 추가/삭제 (Dynamic nature-column add/delete)** — Add or remove nature classification columns from the 문구 설정 탭; each entry sets both the CSV column name and the PDF display name at once
 - **미등록 성격 컬럼 경고 (Unregistered nature-column warning)** — If a configured nature column is missing from `사업비정보.csv`, it is listed as a warning in the final summary dialog
+- **Section 4 분류 근거 동적 행 (Dynamic classification-basis rows)** — Section 4 ("분류 근거") is a typed, dynamic row system editable in the 문구 설정 탭. Three row types — **직공통비**, **성격별분류**, and **custom** — can be freely added and deleted. For custom rows the **근거 텍스트 컬럼** field names a `출력.csv` column whose first value becomes the cell content, and for every row type the **참조문서 컬럼** field names a `출력.csv` column whose first value fills the reference cell (left blank if the column is missing or empty)
 
 ---
 
