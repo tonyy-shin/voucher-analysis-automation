@@ -418,12 +418,12 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             tk.Entry(rf, textvariable=v_label, width=14).pack(side="left")
 
             if row_type == "custom":
-                tk.Label(rf, text="CSV컬럼").pack(side="left", padx=(4, 2))
+                tk.Label(rf, text="근거 텍스트 컬럼").pack(side="left", padx=(4, 2))
                 v_csv = tk.StringVar(value=str(row.get("csv_column", "")))
                 var_map["csv_column"] = v_csv
                 tk.Entry(rf, textvariable=v_csv, width=12).pack(side="left")
 
-            tk.Label(rf, text="참조 CSV 컬럼").pack(side="left", padx=(4, 2))
+            tk.Label(rf, text="참조문서 컬럼").pack(side="left", padx=(4, 2))
             v_ref = tk.StringVar(value=str(row.get("참조_csv_column", "")))
             var_map["참조_csv_column"] = v_ref
             tk.Entry(rf, textvariable=v_ref, width=12).pack(side="left")
