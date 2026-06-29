@@ -79,6 +79,14 @@ def build_classification_basis(
             if csv_col and csv_col in df_output.columns:
                 basis[csv_col] = _first_nonempty(df_output, csv_col)
 
+    # 참조 키 — 모든 행 공통. 참조_csv_column 으로 지정한 컬럼의 첫 non-empty 값.
+    # content 키(csv_column / {col}_근거)와 충돌하지 않도록 "참조__" 접두사를 사용한다.
+    if not empty_df:
+        for r in rows:
+            ref_col = r.get("참조_csv_column", "")
+            if ref_col and ref_col in df_output.columns:
+                basis["참조__" + ref_col] = _first_nonempty(df_output, ref_col)
+
     return basis
 
 

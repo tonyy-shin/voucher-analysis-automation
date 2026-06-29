@@ -117,8 +117,8 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "section4": {
             "제목": "4. 분류 근거",
             "rows": [
-                {"type": "직공통비",   "label": "직 • 공통비", "참조": "총괄문서 참조"},
-                {"type": "성격별분류", "label": "성격별 분류", "참조": "총괄문서 참조"},
+                {"type": "직공통비",   "label": "직 • 공통비", "참조_csv_column": ""},
+                {"type": "성격별분류", "label": "성격별 분류", "참조_csv_column": ""},
             ],
         },
     },
@@ -172,6 +172,7 @@ def load_config() -> dict[str, Any]:
         if not isinstance(loaded, dict):
             return copy.deepcopy(_DEFAULT_CONFIG)
         _discard_legacy_section4(loaded)
+        _normalize_section4_rows(loaded)
         return _deep_merge(_DEFAULT_CONFIG, loaded)
     except Exception:
         return copy.deepcopy(_DEFAULT_CONFIG)
@@ -274,6 +275,27 @@ def _discard_legacy_section4(loaded: dict) -> None:
     sec4 = dl.get("section4")
     if isinstance(sec4, dict) and "rows" not in sec4:
         del dl["section4"]
+
+
+def _normalize_section4_rows(loaded: dict) -> None:
+    """구버전 행의 "참조" 키를 폐기하여 새 "참조_csv_column" 스키마로 정규화한다.
+
+    각 section4 행은 정적 텍스트 "참조" 대신 출력.csv 컬럼명("참조_csv_column")을 갖는다.
+    로드된 행이 "참조" 키만 가지고 "참조_csv_column" 키가 없으면, "참조" 값을 조용히 버리고
+    "참조_csv_column"은 빈 문자열("")로 둔다(_deep_merge 시 기본값 폴백). 병합 전에 호출한다.
+    """
+    dl = loaded.get("display_labels")
+    if not isinstance(dl, dict):
+        return
+    sec4 = dl.get("section4")
+    if not isinstance(sec4, dict):
+        return
+    rows = sec4.get("rows")
+    if not isinstance(rows, list):
+        return
+    for row in rows:
+        if isinstance(row, dict) and "참조" in row and "참조_csv_column" not in row:
+            del row["참조"]
 
 
 def _deep_merge(base: dict, override: dict) -> dict:

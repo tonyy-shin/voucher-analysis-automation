@@ -2,6 +2,8 @@
 
 A Windows tool that auto-generates **Business Expense Statement Analysis PDFs** in bulk from Excel source data (expense pivot tables), one PDF per output code.
 
+**Version:** v2.1.0 (2026/06)
+
 ---
 
 ## Key Features
@@ -16,6 +18,17 @@ A Windows tool that auto-generates **Business Expense Statement Analysis PDFs** 
 - **Dynamic header row detection** — Scans the first 20 rows to locate actual column headers, tolerating variable file layouts
 - **Case-insensitive amount column mapping** — e.g., `"sum of da_p"` is automatically resolved to `"Sum of DA_P"`
 - **Fuzzy matching** — Auto-suggests correct column names when version strings change (e.g., `대상정의 v3.0_0415`)
+- **문구 설정 탭 (Display-label editing tab)** — A second tab in the theme dialog where every PDF display label (titles, headers, section labels) can be edited from a scrollable form
+- **성격 컬럼 동적 추가/삭제 (Dynamic nature-column add/delete)** — Add or remove nature classification columns from the 문구 설정 탭; each entry sets both the CSV column name and the PDF display name at once
+- **미등록 성격 컬럼 경고 (Unregistered nature-column warning)** — If a configured nature column is missing from `사업비정보.csv`, it is listed as a warning in the final summary dialog
+
+---
+
+## Cautions / 주의사항
+
+- **CSV 파일 열린 채로 실행 금지** — If any of the 4 input CSV files are open in Excel or another program when the app runs, a file-access error occurs. Close all CSV files before launching.
+- **문구 설정 컬럼명 = CSV 컬럼명 필수** — Nature column names entered in the 문구 설정 탭 must exactly match the column headers in `사업비정보.csv` (characters and spacing). A mismatch produces a **blank column in the PDF with no error** — only a warning in the summary dialog.
+- **첫 실행 시 몇 초 대기 권장** — On Windows, running the EXE immediately after download may fail due to antivirus/OS scanning. Wait a few seconds after download before running.
 
 ---
 

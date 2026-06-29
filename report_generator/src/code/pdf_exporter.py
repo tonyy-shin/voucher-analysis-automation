@@ -583,7 +583,8 @@ def _tbl_basis(cb: dict, di: dict, nat: pd.DataFrame, s: dict) -> list:
     for row_cfg in rows_cfg:
         row_type = row_cfg.get('type', 'custom')
         label    = row_cfg.get('label', '')
-        참조_text = row_cfg.get('참조', '')
+        ref_col   = row_cfg.get('참조_csv_column', '')
+        참조_text = cb.get('참조__' + ref_col, '') if ref_col else ''
 
         if row_type == '직공통비':
             # 출력.csv의 직접비/공통비 근거 중 텍스트가 채워진 항목만 "{구분}: {텍스트}" 형식

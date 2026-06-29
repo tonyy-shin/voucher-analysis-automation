@@ -392,7 +392,7 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
     def _flush_basis_vars() -> None:
         """현재 Entry StringVar 값들을 basis_rows_state로 반영한다 (재렌더 전 호출).
 
-        프레임을 부수고 다시 그리기 전에 호출하여 입력 중이던 값(라벨/CSV컬럼/참조)이
+        프레임을 부수고 다시 그리기 전에 호출하여 입력 중이던 값(라벨/CSV컬럼/참조 CSV 컬럼)이
         유실되지 않도록 한다.
         """
         for row, var_map in zip(basis_rows_state, basis_vars):
@@ -423,9 +423,9 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
                 var_map["csv_column"] = v_csv
                 tk.Entry(rf, textvariable=v_csv, width=12).pack(side="left")
 
-            tk.Label(rf, text="참조").pack(side="left", padx=(4, 2))
-            v_ref = tk.StringVar(value=str(row.get("참조", "")))
-            var_map["참조"] = v_ref
+            tk.Label(rf, text="참조 CSV 컬럼").pack(side="left", padx=(4, 2))
+            v_ref = tk.StringVar(value=str(row.get("참조_csv_column", "")))
+            var_map["참조_csv_column"] = v_ref
             tk.Entry(rf, textvariable=v_ref, width=12).pack(side="left")
 
             tk.Button(
@@ -444,15 +444,15 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
         _flush_basis_vars()
         if row_type == "직공통비":
             basis_rows_state.append(
-                {"type": "직공통비", "label": "직 • 공통비", "참조": "총괄문서 참조"}
+                {"type": "직공통비", "label": "직 • 공통비", "참조_csv_column": ""}
             )
         elif row_type == "성격별분류":
             basis_rows_state.append(
-                {"type": "성격별분류", "label": "성격별 분류", "참조": "총괄문서 참조"}
+                {"type": "성격별분류", "label": "성격별 분류", "참조_csv_column": ""}
             )
         else:
             basis_rows_state.append(
-                {"type": "custom", "label": "", "csv_column": "", "참조": "총괄문서 참조"}
+                {"type": "custom", "label": "", "csv_column": "", "참조_csv_column": ""}
             )
         _render_basis_rows()
 
