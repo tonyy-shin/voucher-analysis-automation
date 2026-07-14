@@ -275,33 +275,38 @@ def enrich_data(
 def calc_dept_attribution(
     df_enriched: pd.DataFrame,
     df_output: pd.DataFrame = None,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+    group_cols: list[str] | None = None,
+) -> list[pd.DataFrame]:
     """
-    주관부서별·사용부서별 대상금액 합계 및 구성비(%)를 계산한다.
+    귀속 그룹별(기본: 주관부서/사용부서) 대상금액 합계 및 구성비(%)를 계산한다.
 
     [산출 로직]
-    df_output(출력> 시트 전체 flat lookup)의 귀속_주관부서·귀속_사용부서 열에서
-    각각 set을 구성하고, 실제발생사업비 팀 각각을 집합 멤버십으로 분류한다.
-        - 주관_set에만 있음 -> 주관부서
-        - 사용_set에만 있음 -> 사용부서
-        - 양쪽 모두 있음   -> 주관부서 우선
-        - 어디에도 없음    -> 미분류, 표시 제외
-    df_output가 없거나 비어 있으면 귀속_주관/사용부서 콜럼 기준 groupby 폴백.
+    df_output(출력> 시트 전체 flat lookup)의 각 그룹 컬럼(group_cols)에서 set을
+    구성하고, 실제발생사업비 팀 각각을 집합 멤버십으로 분류한다.
+        - 리스트 순서 = 우선순위: 여러 set에 속한 팀은 첫 번째 그룹으로 귀속
+          (기본 [주관, 사용] 순서에서 기존 '양쪽 모두 -> 주관 우선' 규칙과 동일)
+        - 어디에도 없음 -> 미분류, 표시 제외
+    df_output가 없거나 비어 있으면 각 그룹 컬럼 기준 groupby 폴백.
 
     Args:
         df_enriched: enrich_data()의 반환값 ('대상금액', '팀' 콜럼 포함)
         df_output:   출력> 시트 전체 flat lookup DataFrame
+        group_cols:  출력.csv의 부서 목록 컬럼명 리스트
+                     (config display_labels.section2.groups 의 csv_column 값들;
+                     None/빈 리스트면 기존 주관/사용 쌍으로 폴백)
 
     Returns:
-        (df_주관부서, df_사용부서) 튜플.
+        group_cols 와 같은 순서의 DataFrame 리스트.
         각 DataFrame 콜럼: ['부서명', '대상금액', '구성비(%)']
         금액 내림차순 정렬.
 
     [대상금액 흐름]
     enrich_data()가 사업비정보.csv '합계' 컬럼으로 세팅한 df_enriched['대상금액']이
     여기서 팀별로 sum()되어 각 부서 행의 '대상금액'이 되고, pdf_exporter._tbl_dept의
-    d주관/d사용['대상금액'].sum() 총계로 이어진다.
+    그룹별 ['대상금액'].sum() 총계로 이어진다.
     """
+    if not group_cols:
+        group_cols = [COLUMN_MAP["귀속_주관부서"], COLUMN_MAP["귀속_사용부서"]]
     empty = pd.DataFrame(columns=["부서명", "대상금액", "구성비(%)"])
 
     def _finalize(rows: list) -> pd.DataFrame:
@@ -331,49 +336,35 @@ def calc_dept_attribution(
 
     # -- df_output 없음 -> groupby 폴백 -----------------------------------------------
     if df_output is None or df_output.empty or COL_TEAM not in df_enriched.columns:
-        return (
-            _build_from_groupby(COLUMN_MAP["귀속_주관부서"]),
-            _build_from_groupby(COLUMN_MAP["귀속_사용부서"]),
-        )
+        return [_build_from_groupby(col) for col in group_cols]
 
-    # -- 출력> 전체 열에서 주관/사용 set 구성 ------------------------------------------
+    # -- 출력> 전체 열에서 그룹별 set 구성 ---------------------------------------------
     def _make_set(col: str) -> set:
         if col not in df_output.columns:
             return set()
         vals = df_output[col].dropna().astype(str).str.strip()
         return set(vals[~vals.isin({"", FALLBACK_TEXT})].tolist())
 
-    주관_set = _make_set(COLUMN_MAP["귀속_주관부서"])
-    사용_set  = _make_set(COLUMN_MAP["귀속_사용부서"])
+    group_sets = [_make_set(col) for col in group_cols]
 
-    # -- 팀별 set 멤버십 분류 ----------------------------------------------------------
-    주관_rows = []
-    사용_rows = []
+    # -- 팀별 set 멤버십 분류 (첫 번째로 일치한 그룹으로 귀속) --------------------------
+    group_rows: list[list[dict]] = [[] for _ in group_cols]
 
     for team in df_enriched[COL_TEAM].dropna().unique():
         team_str = str(team).strip()
         if not team_str or team_str == FALLBACK_TEXT:
             continue
 
-        in_주관 = team_str in 주관_set
-        in_사용 = team_str in 사용_set
+        for gi, gset in enumerate(group_sets):
+            if team_str in gset:
+                amount = float(
+                    df_enriched.loc[df_enriched[COL_TEAM] == team_str, "대상금액"].sum()
+                )
+                group_rows[gi].append({"부서명": team_str, "대상금액": amount})
+                break
+        # 어느 열에도 없음 -> 미분류, 표시 제외
 
-        if not in_주관 and not in_사용:
-            continue  # 어느 열에도 없음 -> 미분류, 표시 제외
-
-        amount = float(
-            df_enriched.loc[df_enriched[COL_TEAM] == team_str, "대상금액"].sum()
-        )
-
-        # 양쪽 모두 있을 때는 주관부서 우선
-        if in_주관 and not in_사용:
-            주관_rows.append({"부서명": team_str, "대상금액": amount})
-        elif in_사용 and not in_주관:
-            사용_rows.append({"부서명": team_str, "대상금액": amount})
-        else:
-            주관_rows.append({"부서명": team_str, "대상금액": amount})
-
-    return _finalize(주관_rows), _finalize(사용_rows)
+    return [_finalize(rows) for rows in group_rows]
 
 
 
@@ -381,35 +372,60 @@ def calc_dept_attribution(
 #  Step 4 — 직접비 / 공통비 합계
 # ════════════════════════════════════════════════════════════════════════════
 
-def calc_direct_indirect(df_enriched: pd.DataFrame) -> dict[str, float]:
+def calc_direct_indirect(
+    df_enriched: pd.DataFrame,
+    category_rows: list[dict] | None = None,
+) -> dict[str, object]:
     """
-    직공통비·총계를 계산한다.
+    직간접구분 키워드 분류별 합계 및 총계를 계산한다.
 
-    직간접 구분 기준은 부서정보.csv의 '직간접구분' 컬럼 (코스트센터 JOIN으로 결합).
-    '직접' / '공통' 텍스트를 str.contains()로 유연하게 매칭하여
+    분류 기준은 부서정보.csv의 '직간접구분' 컬럼 (코스트센터 JOIN으로 결합).
+    각 분류의 keyword 를 str.contains(regex=False)로 부분 일치 매칭하여
     값 표기 방식 변형(예: '직접비', '직접 비용')에도 대응한다.
+    리스트 순서 = first-match-wins: 이미 위쪽 분류에 잡힌 행은 제외되므로,
+    기본 [직접, 공통] 순서에서 기존 '공통 = contains("공통") & ~직접' 규칙과 동일하다.
 
     Args:
-        df_enriched: enrich_data()의 반환값
+        df_enriched:   enrich_data()의 반환값
+        category_rows: config display_labels.section3_1.rows
+                       ([{"label": str, "keyword": str}, ...];
+                       None/빈 리스트면 기존 직접비/공통비 기본 분류 사용)
 
     Returns:
-        {'직접비': float, '공통비': float, '총계': float}
+        {'rows': [{'label': str, 'amount': float}, ...], '총계': float}
     """
+    if not category_rows:
+        category_rows = [
+            {"label": "직접비", "keyword": "직접"},
+            {"label": "공통비", "keyword": "공통"},
+        ]
+
     총계 = float(df_enriched["대상금액"].sum())
 
     # 직간접 구분 기준 = 부서정보 '직간접구분' 컬럼
     col = COLUMN_MAP["직간접구분"]
 
     if col not in df_enriched.columns:
-        return {"직접비": 0.0, "공통비": 0.0, "총계": 총계}
+        return {
+            "rows": [{"label": r.get("label", ""), "amount": 0.0} for r in category_rows],
+            "총계": 총계,
+        }
 
-    is_직접     = df_enriched[col].str.contains("직접", na=False)
-    is_공통_only = df_enriched[col].str.contains("공통", na=False) & ~is_직접
+    rows: list[dict] = []
+    matched = pd.Series(False, index=df_enriched.index)
+    for r in category_rows:
+        keyword = str(r.get("keyword", ""))
+        if keyword:
+            m = df_enriched[col].str.contains(keyword, na=False, regex=False) & ~matched
+        else:
+            m = pd.Series(False, index=df_enriched.index)
+        rows.append({
+            "label": r.get("label", ""),
+            "amount": float(df_enriched.loc[m, "대상금액"].sum()),
+        })
+        matched |= m
 
-    직접비 = float(df_enriched.loc[is_직접,      "대상금액"].sum())
-    공통비 = float(df_enriched.loc[is_공통_only, "대상금액"].sum())
-
-    return {"직접비": 직접비, "공통비": 공통비, "총계": 총계}
+    return {"rows": rows, "총계": 총계}
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -419,6 +435,7 @@ def calc_direct_indirect(df_enriched: pd.DataFrame) -> dict[str, float]:
 def calc_nature_classification(
     df_enriched: pd.DataFrame,
     df_output: pd.DataFrame = None,
+    dept_cols: list[str] | None = None,
 ) -> pd.DataFrame:
     """
     성격별(NATURE_COLS) × 부점 교차 집계 + 총계 행 추가.
@@ -432,6 +449,9 @@ def calc_nature_classification(
     Args:
         df_enriched:           enrich_data()의 반환값
         df_output: 현재 keyword에 해당하는 출력> 행 (귀속_주관부서, 귀속_사용부서 포함)
+        dept_cols: 출력.csv의 부서 목록 컬럼 (section2.groups 의 csv_column 값들;
+                   None/빈 리스트면 기존 주관/사용 쌍 사용) — 섹션2와 동일한 기준으로
+                   등록 부서를 필터링하기 위해 공유한다.
 
     Returns:
         컬럼: ['귀속_사용부서', '계약체결비', '계약유지비', '손해조사비', '투자관리비',
@@ -457,9 +477,9 @@ def calc_nature_classification(
             .rename(columns={COL_TEAM: dept_col})
         )
 
-        # 2. 출력> 시트 주관/사용부서 전체 수집
+        # 2. 출력> 시트 등록 부서 전체 수집 (section2 그룹 컬럼과 동일 기준)
         all_output_depts: set[str] = set()
-        for col in [COLUMN_MAP["귀속_주관부서"], COLUMN_MAP["귀속_사용부서"]]:
+        for col in (dept_cols or [COLUMN_MAP["귀속_주관부서"], COLUMN_MAP["귀속_사용부서"]]):
             if col in df_output.columns:
                 vals = (
                     df_output[col]
@@ -516,29 +536,43 @@ def calc_nature_classification(
 #  Step 6 — 계정 헤더 정보 추출
 # ════════════════════════════════════════════════════════════════════════════
 
-def extract_account_info(df_enriched: pd.DataFrame) -> dict[str, object]:
+def extract_account_info(
+    df_enriched: pd.DataFrame,
+    field_cols: list[str] | None = None,
+) -> dict[str, str]:
     """
     키워드로 필터링된 단일 계정의 헤더 정보를 추출한다.
 
     동일 키워드로 필터링된 데이터는 모두 같은 계정에 속하므로
     첫 번째 유효 행의 값을 대표값으로 사용한다.
-    반환값은 template_mapper가 헤더 영역(C7·D7·F7·G7·C10~C13)에 주입한다.
+    반환값은 pdf_exporter 가 계정 테이블·섹션1을 csv_column 키로 조회한다.
 
     Args:
         df_enriched: enrich_data()의 반환값
+        field_cols:  추출할 계정정보.csv 컬럼명 리스트
+                     (config account_table.columns + section1.rows 의 csv_column 값들;
+                     None/빈 리스트면 기존 8개 기본 컬럼)
 
     Returns:
-        {
-            '계정번호':   str,   # 원가요소 코드
-            '계정명':     str,   # 계정 이름
-            '직간접구분': str,   # '직접비' 또는 '공통비'
-            '대상정의':   str,   # 대상정의 v3.0_0415
-            '범위':       str,   # 사용부서
-            '지급대상':   str,   # 비용 지급 범위
-            '산출기준':   str,
-            '대상금액':   float, # 전체 대상금액 합계
-        }
+        {csv_column: 첫 번째 유효 값(str)} — field_cols 의 각 컬럼이 키가 된다.
+
+    [주의 — 계정번호 별칭]
+    enrich_data()의 JOIN 2 가 우측 키 컬럼(계정번호)을 drop 하므로 df_enriched 에는
+    계정번호 컬럼이 없다. 설정된 컬럼이 계정번호(COLUMN_MAP)와 같으면
+    JOIN 키인 원가요소 컬럼에서 값을 읽는다 (동일 값).
     """
+    if not field_cols:
+        field_cols = [
+            COLUMN_MAP["계정번호"],
+            COLUMN_MAP["계정명"],
+            COLUMN_MAP["계정그룹ID"],
+            COLUMN_MAP["계정그룹명"],
+            COLUMN_MAP["대상정의"],
+            COLUMN_MAP["범위"],
+            COLUMN_MAP["지급대상"],
+            COLUMN_MAP["산출기준"],
+        ]
+
     def _first_valid(col: str) -> str:
         if col not in df_enriched.columns:
             return ""
@@ -546,16 +580,13 @@ def extract_account_info(df_enriched: pd.DataFrame) -> dict[str, object]:
         series = series[series.astype(str).str.strip().isin(["", FALLBACK_TEXT]) == False]  # noqa: E712
         return str(series.iloc[0]).strip() if not series.empty else ""
 
-    return {
-        "계정번호":   _first_valid(COLUMN_MAP["원가요소"]),
-        "계정명":     _first_valid(COLUMN_MAP["계정명"]),
-        "계정그룹ID": _first_valid(COLUMN_MAP["계정그룹ID"]),
-        "계정그룹명": _first_valid(COLUMN_MAP["계정그룹명"]),
-        "대상정의":   _first_valid(COLUMN_MAP["대상정의"]),
-        "범위":       _first_valid(COLUMN_MAP["범위"]),
-        "지급대상":   _first_valid(COLUMN_MAP["지급대상"]),
-        "산출기준":   _first_valid(COLUMN_MAP["산출기준"]),
-    }
+    def _resolve(col: str) -> str:
+        # 계정번호는 JOIN 2 에서 drop 되므로 원가요소(JOIN 키)로 별칭 처리
+        if col not in df_enriched.columns and col == COLUMN_MAP["계정번호"]:
+            return COLUMN_MAP["원가요소"]
+        return col
+
+    return {col: _first_valid(_resolve(col)) for col in field_cols}
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -565,7 +596,7 @@ def extract_account_info(df_enriched: pd.DataFrame) -> dict[str, object]:
 def run_pipeline(
     sheets: dict[str, pd.DataFrame],
     keyword: str,
-    basis_rows: list[dict] | None = None,
+    labels: dict,
 ) -> dict[str, object]:
     """
     Phase 1 전체 파이프라인(Step 1~6)을 실행하고 결과를 dict로 반환한다.
@@ -573,18 +604,23 @@ def run_pipeline(
     main.py에서 단일 호출로 파이프라인 전체를 완료할 수 있도록 제공되는
     편의 함수. 각 Step을 순서대로 실행하며 의존성을 유지한다.
 
+    레이어링 주의: processor 는 config_manager 를 import 하지 않는다.
+    main.py 가 config["display_labels"] 를 명시적으로 넘겨 연결하며,
+    여기서는 labels.get(...) 으로 누락 키를 방어한다 (누락 시 빈 결과로 강등).
+
     Args:
-        sheets:     data_loader.load_all_csvs()의 반환값
-        keyword:    사용자 입력 키워드
-        basis_rows: config display_labels.section4.rows (섹션4 분류 근거 행 설정)
+        sheets:  data_loader.load_all_csvs()의 반환값
+        keyword: 사용자 입력 키워드
+        labels:  config["display_labels"] 전체 dict — 섹션별 동적 리스트
+                 (account_table.columns / section1.rows / section2.groups /
+                 section3_1.rows / section4.rows)를 여기서 꺼내 각 Step 에 전달한다.
 
     Returns:
         {
-            'account_info':    dict,       # extract_account_info 결과
-            'dept_주관':       DataFrame,  # 주관부서별 귀속 현황
-            'dept_사용':       DataFrame,  # 사용부서별 귀속 현황
-            'direct_indirect': dict,       # 직접비·공통비·총계
-            'nature':          DataFrame,  # 성격별 × 부점 교차 집계
+            'account_info':    dict,             # extract_account_info 결과 (csv_column 키)
+            'dept_groups':     list[DataFrame],  # section2.groups 순서의 귀속 현황
+            'direct_indirect': dict,             # {'rows': [...], '총계': float}
+            'nature':          DataFrame,        # 성격별 × 부점 교차 집계
         }
 
     Raises:
@@ -595,8 +631,25 @@ def run_pipeline(
     df_account = sheets[_SHEET_ACCOUNT]
     df_output  = sheets.get(_SHEET_OUTPUT, pd.DataFrame())
 
+    # ── display_labels 동적 리스트 추출 (누락/비정상 키는 빈 리스트로 방어) ──
+    def _entries(sec_key: str, list_key: str) -> list[dict]:
+        sec = labels.get(sec_key) if isinstance(labels, dict) else None
+        entries = sec.get(list_key) if isinstance(sec, dict) else None
+        if not isinstance(entries, list):
+            return []
+        return [e for e in entries if isinstance(e, dict)]
+
+    basis_rows = _entries("section4", "rows")
+    group_cols = [g["csv_column"] for g in _entries("section2", "groups") if g.get("csv_column")]
+    di_rows    = _entries("section3_1", "rows")
+    field_cols = list(dict.fromkeys(
+        e["csv_column"]
+        for e in _entries("account_table", "columns") + _entries("section1", "rows")
+        if e.get("csv_column")
+    ))
+
     # ── 분류 근거: 섹션4 행 설정(basis_rows) 기준 legacy + custom 텍스트 추출 ──
-    classification_basis = build_classification_basis(df_output, basis_rows or [])
+    classification_basis = build_classification_basis(df_output, basis_rows)
 
     # Step 1 — 필터링
     df_filtered = filter_by_keyword(df_actual, keyword)
@@ -605,17 +658,15 @@ def run_pipeline(
     df_enriched = enrich_data(df_filtered, df_ccm, df_account, df_output)
 
     # Step 3 — 부점귀속 현황
-    # df_output 전체를 flat lookup 테이블로 사용하여 팀 주관/사용 분류
-    df_주관, df_사용 = calc_dept_attribution(df_enriched, df_output)
+    # df_output 전체를 flat lookup 테이블로 사용하여 그룹별 팀 귀속 분류
+    dept_groups = calc_dept_attribution(df_enriched, df_output, group_cols)
 
-    di_result   = calc_direct_indirect(df_enriched)                      # Step 4
+    di_result = calc_direct_indirect(df_enriched, di_rows)               # Step 4
 
-    # ── 정합성 검증: 부점귀속 주관 총계 + 누락 총합 ≈ 직접비+공통비 총계 ──────
     return {
-        "account_info":         extract_account_info(df_enriched),       # Step 6
-        "dept_주관":            df_주관,                                  # Step 3
-        "dept_사용":            df_사용,                                  # Step 3
+        "account_info":         extract_account_info(df_enriched, field_cols),  # Step 6
+        "dept_groups":          dept_groups,                             # Step 3
         "direct_indirect":      di_result,                               # Step 4
-        "nature":               calc_nature_classification(df_enriched, df_output), # Step 5
+        "nature":               calc_nature_classification(df_enriched, df_output, group_cols),  # Step 5
         "classification_basis": classification_basis,                   # 출력.csv 코드별 분류 근거
     }

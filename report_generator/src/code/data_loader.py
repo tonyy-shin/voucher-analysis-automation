@@ -65,6 +65,15 @@ BASIS_TEXT_COLS: list[str] = [
     "직접비", "간접비", "공통비", "계약체결비", "계약유지비", "손해조사비", "투자관리비",
 ]
 
+# ── display_labels 동적 리스트에서 파생되는 컬럼 목록 ─────────────────────────
+# _apply_config_overrides()가 in-place([:]) 갱신 — NATURE_COLS와 동일 패턴.
+# EXTRA_ACCOUNT_COLS: account_table.columns / section1.rows 가 추가로 요구하는
+#   계정정보.csv 컬럼. _preprocess_account 의 컬럼 선별에서 잘려나가지 않게 한다.
+# DEPT_GROUP_COLS: section2.groups 의 출력.csv 부서 목록 컬럼.
+#   비어 있으면 COLUMN_MAP 의 주관/사용 쌍으로 폴백한다.
+EXTRA_ACCOUNT_COLS: list[str] = []
+DEPT_GROUP_COLS: list[str] = []
+
 
 # ── 데이터셋별 필수 컬럼: 없으면 JOIN이 전량 NaN으로 오염되므로 즉시 에러 ──────
 _REQUIRED_TRANSACTION_COLS: list[str] = [
@@ -88,7 +97,7 @@ def _get_ccm_cols_needed() -> list[str]:
 
 
 def _get_account_cols_needed() -> list[str]:
-    return [
+    cols = [
         COLUMN_MAP["계정번호"],
         COLUMN_MAP["계정명"],
         COLUMN_MAP["계정그룹ID"],
@@ -98,6 +107,14 @@ def _get_account_cols_needed() -> list[str]:
         COLUMN_MAP["지급대상"],
         COLUMN_MAP["산출기준"],
     ]
+    # 사용자가 account_table/section1 에 추가한 컬럼 — 여기서 빠지면
+    # _preprocess_account 의 컬럼 선별에 잘려 PDF에 조용히 빈 칸이 출력된다.
+    seen = set(cols)
+    for c in EXTRA_ACCOUNT_COLS:
+        if c and c not in seen:
+            cols.append(c)
+            seen.add(c)
+    return cols
 
 
 def _get_output_cols_needed() -> list[str]:
@@ -136,6 +153,24 @@ def _apply_config_overrides(config: dict | None) -> None:
     _REQUIRED_CCM_COLS         = [COLUMN_MAP["cc_code"],  COLUMN_MAP["직간접구분"]]
     _REQUIRED_ACCOUNT_COLS     = [COLUMN_MAP["계정번호"]]
 
+    # display_labels 동적 리스트 → 파생 컬럼 목록 (in-place 갱신, NATURE_COLS 패턴)
+    dl = config.get("display_labels")
+    if isinstance(dl, dict):
+        def _csv_cols(sec_key: str, list_key: str) -> list[str]:
+            sec = dl.get(sec_key)
+            entries = sec.get(list_key) if isinstance(sec, dict) else None
+            if not isinstance(entries, list):
+                return []
+            return [
+                e.get("csv_column", "")
+                for e in entries
+                if isinstance(e, dict) and e.get("csv_column")
+            ]
+
+        extra = _csv_cols("account_table", "columns") + _csv_cols("section1", "rows")
+        EXTRA_ACCOUNT_COLS[:] = list(dict.fromkeys(extra))
+        DEPT_GROUP_COLS[:] = list(dict.fromkeys(_csv_cols("section2", "groups")))
+
 
 def _read_csv(path: Path) -> pd.DataFrame:
     """CSV를 모든 값 str로 읽는다. utf-8-sig 우선, 실패 시 cp949 폴백."""
@@ -156,7 +191,8 @@ def check_unregistered_teams(file_paths: dict, config: dict | None = None) -> li
     Set A: 사업비정보의 코스트센터 → 부서정보 JOIN으로 얻은 팀.
            코스트센터가 부서정보에 없으면 "(미매칭:{코스트센터코드})"로 포함하여
            등록되지 않은 코스트센터도 미등록 경고에 잡히도록 한다.
-    Set B: 출력.csv의 주관부서 ∪ 사용부서.
+    Set B: 출력.csv의 귀속 그룹 컬럼 합집합 (기본: 주관부서 ∪ 사용부서,
+           section2.groups 설정 시 해당 컬럼들).
 
     load_all_csvs() 이전에 호출되므로, 함수 진입 시 _apply_config_overrides(config)를
     먼저 호출하여 config의 컬럼명 오버라이드(COLUMN_MAP)가 반영된 상태에서 검증한다.
@@ -217,7 +253,9 @@ def check_unregistered_teams(file_paths: dict, config: dict | None = None) -> li
         return []
 
     set_b: set[str] = set()
-    for col in [col_주관, col_사용]:
+    # section2 귀속 그룹 설정이 있으면 그 컬럼들을, 없으면 기본 주관/사용 쌍을 사용
+    # (_apply_config_overrides 가 위에서 DEPT_GROUP_COLS 를 갱신한 상태)
+    for col in (DEPT_GROUP_COLS or [col_주관, col_사용]):
         if col in df_out.columns:
             vals = df_out[col].dropna().astype(str).str.strip()
             set_b.update(vals[~vals.isin({"", "nan", FALLBACK_TEXT})].tolist())

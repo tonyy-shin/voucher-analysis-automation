@@ -62,6 +62,83 @@ def _fmt_slot_label(path: str | None) -> str:
     return name if len(name) <= 30 else "..." + name[-27:]
 
 
+def _make_rows_editor(
+    parent: tk.Frame,
+    dlg: tk.Toplevel,
+    rows_state: list[dict],
+    fields: list[tuple[str, str, int]],
+    new_row,
+    min_rows: int = 1,
+    section_name: str = "항목",
+):
+    """동적 행 편집기 팩토리 — 균일한 dict 행 리스트(계정 테이블/섹션1/2/3-1) 공용.
+
+    3-2 성격 편집기(str 리스트 상태)와 섹션4 편집기(타입별 조건부 필드)는 상태 구조가
+    달라 의도적으로 별도 구현을 유지한다 — 이 팩토리로 억지로 통합하지 말 것.
+
+    flush()는 fields 에 선언된 키만 행 dict 에 되쓰므로, 선언되지 않은 키
+    (예: account_table.columns 의 width)는 편집 중에도 보존된다.
+
+    Args:
+        parent:       행 프레임을 붙일 부모 (스크롤 영역 내부 프레임)
+        dlg:          messagebox 부모 다이얼로그
+        rows_state:   config에서 deep-copy 한 행 dict 리스트 (in-place 편집됨)
+        fields:       [(행 dict 키, 캡션, Entry 너비), ...]
+        new_row:      "+ 추가" 시 append 할 새 행 dict 를 반환하는 콜러블
+        min_rows:     최소 행 수 (삭제 가드)
+        section_name: 경고 메시지에 표시할 섹션명
+
+    Returns:
+        (frame, flush, render, add) — 호출부가 frame 을 배치하고 render()를 1회 호출한다.
+        flush()는 입력 중인 Entry 값을 rows_state 로 반영한다 (저장 전 필수 호출).
+    """
+    frame = tk.Frame(parent)
+    vars_list: list[dict[str, tk.StringVar]] = []   # rows_state와 인덱스 정렬
+
+    def flush() -> None:
+        for row, var_map in zip(rows_state, vars_list):
+            for key, var in var_map.items():
+                row[key] = var.get()
+
+    def _delete(idx: int) -> None:
+        if len(rows_state) <= min_rows:
+            messagebox.showwarning(
+                "최소 개수",
+                f"{section_name}은(는) 최소 {min_rows}개 이상이어야 합니다.",
+                parent=dlg,
+            )
+            return
+        flush()
+        del rows_state[idx]
+        render()
+
+    def render() -> None:
+        for w in frame.winfo_children():
+            w.destroy()
+        vars_list.clear()
+        for idx, row in enumerate(rows_state):
+            rf = tk.Frame(frame)
+            rf.grid(row=idx, column=0, sticky="w", padx=8, pady=2)
+            var_map: dict[str, tk.StringVar] = {}
+            for key, caption, width in fields:
+                tk.Label(rf, text=caption).pack(side="left", padx=(4, 2))
+                v = tk.StringVar(value=str(row.get(key, "")))
+                var_map[key] = v
+                tk.Entry(rf, textvariable=v, width=width).pack(side="left")
+            tk.Button(
+                rf, text="삭제", width=5,
+                command=(lambda i=idx: _delete(i)),
+            ).pack(side="left", padx=(4, 0))
+            vars_list.append(var_map)
+
+    def add() -> None:
+        flush()
+        rows_state.append(new_row())
+        render()
+
+    return frame, flush, render, add
+
+
 def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> CompanyTheme:
     """포인트 색상·로고·문구 설정 팝업 (탭 구성).
 
@@ -263,29 +340,21 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
     _dl = config["display_labels"]
 
     # (그룹 제목, [(경로, 캡션), ...]) — 섹션 간 동일 텍스트는 캡션에 섹션을 명시한다.
+    # 개수 가변 항목(계정 테이블 columns / 섹션1 rows / 섹션2 groups / 섹션3-1 rows /
+    # 성격 컬럼 / 섹션4 rows)은 정적 목록이 아닌 동적 행 편집기로 렌더링한다.
     _label_groups: list[tuple[str, list[tuple[tuple, str]]]] = [
         ("상단", [
             (("header",), "제목 배너"),
         ]),
         ("계정 테이블", [
-            (("account_table", "계정"), "계정"),
-            (("account_table", "계정코드"), "계정코드"),
-            (("account_table", "계정명"), "계정명"),
-            (("account_table", "사업비코드"), "사업비 코드"),
-            (("account_table", "채널구분"), "채널구분"),
+            (("account_table", "계정"), "계정 (병합 셀)"),
         ]),
         ("1. 대상정의", [
             (("section1", "제목"), "섹션 제목"),
-            (("section1", "대상정의"), "대상정의"),
-            (("section1", "범위"), "범위"),
-            (("section1", "지급대상"), "지급대상"),
-            (("section1", "산출기준"), "산출기준"),
         ]),
         ("2. 부점귀속 현황", [
             (("section2", "제목"), "섹션 제목"),
             (("section2", "귀속현황"), "귀속현황 (섹션2)"),
-            (("section2", "주관부서귀속"), "주관부서 귀속"),
-            (("section2", "실제사용부서귀속"), "실제 사용부서 귀속"),
             (("section2", "부점명"), "부점명"),
             (("section2", "대상금액"), "대상금액 헤더"),
             (("section2", "구성비"), "구성비 헤더"),
@@ -296,8 +365,6 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             (("section3_1", "제목"), "섹션 제목"),
             (("section3_1", "구분"), "구분"),
             (("section3_1", "분류금액"), "분류금액"),
-            (("section3_1", "직접비"), "직접비"),
-            (("section3_1", "공통비"), "공통비"),
         ]),
         # 성격 컬럼(nature_cols)은 개수가 가변이므로 아래 정적 목록이 아닌
         # 동적 편집 블록(_render_nature_rows)으로 렌더링한다.
@@ -456,7 +523,73 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             )
         _render_basis_rows()
 
+    # ── 계정 테이블/섹션1/섹션2/섹션3-1 동적 행 편집기 (_make_rows_editor 공용) ──
+    acct_cols_state: list[dict] = copy.deepcopy(_dl["account_table"].get("columns", []))
+    sec1_rows_state: list[dict] = copy.deepcopy(_dl["section1"].get("rows", []))
+    sec2_groups_state: list[dict] = copy.deepcopy(_dl["section2"].get("groups", []))
+    sec31_rows_state: list[dict] = copy.deepcopy(_dl["section3_1"].get("rows", []))
+
+    acct_frame, acct_flush, acct_render, acct_add = _make_rows_editor(
+        _lbl_inner, dlg, acct_cols_state,
+        [("label", "라벨", 14), ("csv_column", "계정정보 컬럼", 16)],
+        lambda: {"label": "", "csv_column": ""},
+        section_name="계정 테이블 컬럼",
+    )
+    sec1_frame, sec1_flush, sec1_render, sec1_add = _make_rows_editor(
+        _lbl_inner, dlg, sec1_rows_state,
+        [("label", "라벨", 14), ("csv_column", "계정정보 컬럼", 16)],
+        lambda: {"label": "", "csv_column": ""},
+        section_name="대상정의 행",
+    )
+    sec2_frame, sec2_flush, sec2_render, sec2_add = _make_rows_editor(
+        _lbl_inner, dlg, sec2_groups_state,
+        [("label", "라벨", 16), ("csv_column", "출력.csv 부서 컬럼", 14)],
+        lambda: {"label": "", "csv_column": ""},
+        section_name="귀속 그룹",
+    )
+    sec31_frame, sec31_flush, sec31_render, sec31_add = _make_rows_editor(
+        _lbl_inner, dlg, sec31_rows_state,
+        [("label", "라벨", 14), ("keyword", "매칭 키워드", 14)],
+        lambda: {"label": "", "keyword": ""},
+        section_name="분류 행",
+    )
+
     label_vars: dict[tuple, tk.StringVar] = {}
+
+    def _mount_rows_editor(r: int, hint: str, frame: tk.Frame, render, add, add_label: str) -> int:
+        """그룹 정적 필드 아래에 동적 행 편집기 블록(힌트/행/추가 버튼)을 배치한다."""
+        tk.Label(
+            _lbl_inner, text=hint,
+            font=("맑은 고딕", 8), anchor="w", fg="#c0392b",
+            wraplength=560, justify="left",
+        ).grid(row=r, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
+        r += 1
+        frame.grid(row=r, column=0, columnspan=2, sticky="w")
+        r += 1
+        render()
+        btn_row = tk.Frame(_lbl_inner)
+        btn_row.grid(row=r, column=0, columnspan=2, sticky="w", padx=8, pady=(2, 6))
+        r += 1
+        tk.Button(btn_row, text=add_label, command=add).pack(side="left")
+        return r
+
+    # 그룹 제목 → 그 그룹의 정적 필드 아래에 붙일 동적 편집기 마운트 콜백
+    _editor_mounts = {
+        "계정 테이블": lambda r: _mount_rows_editor(
+            r, "※ 계정정보.csv에 없는 컬럼은 빈 칸으로 출력됩니다.",
+            acct_frame, acct_render, acct_add, "+ 컬럼 추가"),
+        "1. 대상정의": lambda r: _mount_rows_editor(
+            r, "※ 계정정보.csv에 없는 컬럼은 빈 칸으로 출력됩니다.",
+            sec1_frame, sec1_render, sec1_add, "+ 행 추가"),
+        "2. 부점귀속 현황": lambda r: _mount_rows_editor(
+            r, "※ 출력.csv의 부서 목록 컬럼명. 위쪽 그룹이 우선 귀속됩니다.",
+            sec2_frame, sec2_render, sec2_add, "+ 그룹 추가"),
+        "3-1. 직접비 공통비 분류 결과": lambda r: _mount_rows_editor(
+            r, "※ 부서정보.csv 직간접구분 값 부분일치. 위에서부터 먼저 일치한 분류로 "
+               "집계됩니다. (섹션4 '직공통비' 근거 문구와는 별개입니다.)",
+            sec31_frame, sec31_render, sec31_add, "+ 분류 추가"),
+    }
+
     _r = 0
     for group_title, fields in _label_groups:
         tk.Label(
@@ -475,7 +608,13 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             )
             _r += 1
 
+        # 그룹 정적 필드 직후에 동적 행 편집기 삽입 (계정/섹션1/2/3-1)
+        _mount = _editor_mounts.get(group_title)
+        if _mount is not None:
+            _r = _mount(_r)
+
         # 3-2 그룹 직후에 성격 컬럼 동적 편집 블록을 삽입한다.
+        # (성격 편집기는 str 리스트 상태 + 입력창 딸린 추가 버튼이라 별도 구현 유지)
         if group_title == "3-2. 성격별 분류 결과":
             tk.Label(
                 _lbl_inner, text="성격 컬럼 (CSV 컬럼명 = 표시명, 3-2 표)",
@@ -573,6 +712,49 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
                 )
                 return
 
+        # 0-2) 동적 행 편집기(계정 테이블/섹션1/2/3-1) 검증 — 실패 시 저장 중단.
+        # (섹션명, flush, 상태 리스트, 라벨 외 필수 키, 그 키의 표시명)
+        _dyn_sections = [
+            ("계정 테이블 컬럼",   acct_flush,  acct_cols_state,   "csv_column", "계정정보 컬럼명"),
+            ("대상정의(1) 행",     sec1_flush,  sec1_rows_state,   "csv_column", "계정정보 컬럼명"),
+            ("부점귀속(2) 그룹",   sec2_flush,  sec2_groups_state, "csv_column", "출력.csv 컬럼명"),
+            ("분류(3-1) 행",       sec31_flush, sec31_rows_state,  "keyword",    "매칭 키워드"),
+        ]
+        for sec_name, flush, state, key_field, key_caption in _dyn_sections:
+            flush()
+            if not state:
+                messagebox.showwarning(
+                    "최소 1개", f"{sec_name}은(는) 최소 1개 이상이어야 합니다.", parent=dlg
+                )
+                return
+            for row in state:
+                if not str(row.get("label", "")).strip():
+                    messagebox.showwarning(
+                        "입력 오류", f"{sec_name}의 라벨은 비울 수 없습니다.", parent=dlg
+                    )
+                    return
+                if not str(row.get(key_field, "")).strip():
+                    messagebox.showwarning(
+                        "입력 오류",
+                        f"{sec_name}의 {key_caption}은(는) 비울 수 없습니다.",
+                        parent=dlg,
+                    )
+                    return
+            keys = [str(row.get(key_field, "")).strip() for row in state]
+            if len(set(keys)) != len(keys):
+                messagebox.showwarning(
+                    "중복 오류",
+                    f"{sec_name}에 중복된 {key_caption}이(가) 있습니다.",
+                    parent=dlg,
+                )
+                return
+        # 검증 통과 후 문자열 값 공백 정리 (CSV 컬럼 조회가 공백에 민감)
+        for _, _, state, _, _ in _dyn_sections:
+            for row in state:
+                for k, v in row.items():
+                    if isinstance(v, str):
+                        row[k] = v.strip()
+
         valid_paths = [p for p in slots if p]
         new_theme = CompanyTheme(
             primary_hex=current_hex[0],
@@ -591,6 +773,11 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
         config["display_labels"]["section3_2"]["nature_cols"] = list(new_nature)
         # 섹션4 분류 근거 행 설정 반영
         config["display_labels"]["section4"]["rows"] = basis_rows_state
+        # 계정 테이블/섹션1/2/3-1 동적 리스트 반영
+        config["display_labels"]["account_table"]["columns"] = acct_cols_state
+        config["display_labels"]["section1"]["rows"] = sec1_rows_state
+        config["display_labels"]["section2"]["groups"] = sec2_groups_state
+        config["display_labels"]["section3_1"]["rows"] = sec31_rows_state
         if not save_config(config):
             messagebox.showwarning(
                 "문구 저장 실패",
@@ -871,11 +1058,77 @@ def main() -> None:
         )
         sys.exit(1)
 
-    # 설정된 성격 컬럼 중 사업비정보.csv에 실제로 없는 컬럼 (전 코드 공통 — 1회 계산)
+    # ── 설정 vs 실제 CSV 검사 — 비차단 경고 (전 코드 공통, 1회 계산) ──────────
+    _dl_cfg = config.get("display_labels", {})
+
+    def _cfg_entries(sec_key: str, list_key: str) -> list[dict]:
+        sec = _dl_cfg.get(sec_key, {})
+        entries = sec.get(list_key, []) if isinstance(sec, dict) else []
+        return [e for e in entries if isinstance(e, dict)]
+
+    # 설정된 성격 컬럼 중 사업비정보.csv에 실제로 없는 컬럼
     unknown_nature = [
         c for c in data_loader.NATURE_COLS
         if c not in sheets[data_loader._SHEET_TRANSACTION].columns
     ]
+
+    # 계정 테이블/섹션1 의 csv_column 중 계정정보.csv에 없는 컬럼
+    # (JOIN 전 원본 시트 기준이므로 계정번호도 그대로 존재 — 별칭 불필요)
+    _acct_available = set(sheets[data_loader._SHEET_ACCOUNT].columns)
+    unknown_account = [
+        c for c in dict.fromkeys(
+            e.get("csv_column", "")
+            for e in _cfg_entries("account_table", "columns") + _cfg_entries("section1", "rows")
+        )
+        if c and c not in _acct_available
+    ]
+
+    # 섹션2 귀속 그룹의 csv_column 중 출력.csv에 없는 컬럼
+    _out_available = set(sheets[_SHEET_OUTPUT].columns)
+    unknown_group = [
+        c for c in dict.fromkeys(
+            e.get("csv_column", "") for e in _cfg_entries("section2", "groups")
+        )
+        if c and c not in _out_available
+    ]
+
+    # 섹션3-1 키워드 중 부서정보.csv 직간접구분 값에 전혀 일치하지 않는 키워드
+    _gubun_col = COLUMN_MAP["직간접구분"]
+    _df_ccm = sheets[data_loader._SHEET_CCM]
+    unmatched_keywords: list[str] = []
+    if _gubun_col in _df_ccm.columns:
+        _gubun_series = _df_ccm[_gubun_col].astype(str)
+        for e in _cfg_entries("section3_1", "rows"):
+            kw = str(e.get("keyword", ""))
+            if kw and not _gubun_series.str.contains(kw, na=False, regex=False).any():
+                unmatched_keywords.append(kw)
+
+    # (경고 섹션 제목, 부연 설명, 항목 리스트) — _show_summary_dialog 가 ⚠️ 블록으로 렌더
+    config_warnings: list[tuple[str, str, list[str]]] = []
+    if unknown_nature:
+        config_warnings.append((
+            "미등록 성격 컬럼",
+            "사업비정보.csv에 없는 컬럼 — 해당 컬럼은 빈 칸으로 출력됩니다",
+            unknown_nature,
+        ))
+    if unknown_account:
+        config_warnings.append((
+            "미등록 계정정보 컬럼 (계정 테이블/섹션1)",
+            "계정정보.csv에 없는 컬럼 — 해당 항목은 빈 칸으로 출력됩니다",
+            unknown_account,
+        ))
+    if unknown_group:
+        config_warnings.append((
+            "미등록 부점귀속 그룹 컬럼 (섹션2)",
+            "출력.csv에 없는 컬럼 — 해당 그룹은 빈 표로 출력됩니다",
+            unknown_group,
+        ))
+    if unmatched_keywords:
+        config_warnings.append((
+            "일치 부서 없는 분류 키워드 (섹션3-1)",
+            "직간접구분 값에 일치하는 부서가 없어 0원으로 출력됩니다",
+            unmatched_keywords,
+        ))
 
     # ── Step 5: 출력전표 코드 목록 수집 (출력.csv의 출력전표 컬럼에서) ──────────
     col_output_code = COLUMN_MAP["출력전표"]
@@ -902,8 +1155,7 @@ def main() -> None:
         code_str = str(code).strip()
 
         try:
-            basis_rows = config.get("display_labels", {}).get("section4", {}).get("rows", [])
-            results = processor.run_pipeline(sheets, code_str, basis_rows=basis_rows)
+            results = processor.run_pipeline(sheets, code_str, labels=config["display_labels"])
         except ValueError as exc:
             errors.append((code_str, str(exc)))
             continue
@@ -935,7 +1187,7 @@ def main() -> None:
         successes.append(code_str)
 
     # ── Step 7: 완료 요약 ──────────────────────────────────────────────────
-    _show_summary_dialog(root, successes, errors, _unregistered, unknown_nature)
+    _show_summary_dialog(root, successes, errors, _unregistered, config_warnings)
 
 
 
@@ -944,11 +1196,16 @@ def _show_summary_dialog(
     successes: list[str],
     errors: list[tuple[str, str]],
     unregistered: list[str],
-    unknown_nature: list[str],
+    config_warnings: list[tuple[str, str, list[str]]],
 ) -> None:
-    """PDF 일괄 생성 결과를 성공/경고/실패 섹션으로 구분하여 표시한다."""
-    # 경고 '범주' 수 (미등록 팀 / 미등록 성격 컬럼)
-    n_warn = (1 if unregistered else 0) + (1 if unknown_nature else 0)
+    """PDF 일괄 생성 결과를 성공/경고/실패 섹션으로 구분하여 표시한다.
+
+    Args:
+        config_warnings: (경고 제목, 부연 설명, 항목 리스트) 튜플 목록 —
+                         설정 vs CSV 불일치 등 비차단 경고를 ⚠️ 블록으로 렌더한다.
+    """
+    # 경고 '범주' 수 (미등록 팀 + 설정 경고 블록 수)
+    n_warn = (1 if unregistered else 0) + len(config_warnings)
 
     win = tk.Toplevel(root)
     win.title("PDF 일괄 생성 결과")
@@ -981,11 +1238,11 @@ def _show_summary_dialog(
             _write(f"  • {team}\n", "warning")
         _write("\n")
 
-    if unknown_nature:
-        _write(f"⚠️ 미등록 성격 컬럼 ({len(unknown_nature)}건)\n", "sec_bold", "warning")
-        _write("\n  [CSV에 없는 컬럼 — 해당 컬럼은 빈 칸으로 출력됩니다]\n", "warning")
-        for col in unknown_nature:
-            _write(f"  • {col}\n", "warning")
+    for warn_title, warn_note, warn_items in config_warnings:
+        _write(f"⚠️ {warn_title} ({len(warn_items)}건)\n", "sec_bold", "warning")
+        _write(f"\n  [{warn_note}]\n", "warning")
+        for item in warn_items:
+            _write(f"  • {item}\n", "warning")
         _write("\n")
 
     if errors:

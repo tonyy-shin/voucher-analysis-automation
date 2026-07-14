@@ -64,25 +64,36 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     #       별개입니다. 섹션 키(header, section1 ...)와 항목 키는 수정하지 마세요.
     "display_labels": {
         "header": "[ 사업비 전표 분석 ]",
+        # 계정 테이블 컬럼은 동적 리스트 — csv_column 은 계정정보.csv 의 실제 헤더명.
+        # width 는 컬럼 폭 비율 (기본 1.0, YAML 에서만 수정 — UI 미노출).
         "account_table": {
             "계정": "계정",
-            "계정코드": "계정코드",
-            "계정명": "계정명",
-            "사업비코드": "사업비 코드",
-            "채널구분": "채널구분",
+            "columns": [
+                {"label": "계정코드",   "csv_column": "계정번호",   "width": 1.0},
+                {"label": "계정명",     "csv_column": "계정명",     "width": 1.5},
+                {"label": "사업비 코드", "csv_column": "계정그룹ID", "width": 1.0},
+                {"label": "채널구분",   "csv_column": "계정그룹명", "width": 2.5},
+            ],
         },
+        # 섹션1 행도 동적 리스트 — csv_column 은 계정정보.csv 의 실제 헤더명.
         "section1": {
             "제목": "1. 대상정의",
-            "대상정의": "대상정의",
-            "범위": "범위",
-            "지급대상": "지급대상",
-            "산출기준": "산출기준",
+            "rows": [
+                {"label": "대상정의", "csv_column": "대상정의"},
+                {"label": "범위",     "csv_column": "사용 부서"},
+                {"label": "지급대상", "csv_column": "비용 지급 범위"},
+                {"label": "산출기준", "csv_column": "산출기준"},
+            ],
         },
+        # 섹션2 귀속 그룹은 동적 리스트 — csv_column 은 출력.csv 의 부서 목록 컬럼명.
+        # 리스트 순서 = 귀속 우선순위 (여러 그룹에 속한 팀은 위쪽 그룹으로 귀속).
         "section2": {
             "제목": "2. 부점귀속 현황",
             "귀속현황": "귀속현황",
-            "주관부서귀속": "주관부서 귀속",
-            "실제사용부서귀속": "실제 사용부서 귀속",
+            "groups": [
+                {"label": "주관부서 귀속",     "csv_column": "주관부서"},
+                {"label": "실제 사용부서 귀속", "csv_column": "사용부서"},
+            ],
             "부점명": "부점명",
             "대상금액": "대상금액(단위: 원)",
             "구성비": "구성비(%)",
@@ -90,12 +101,16 @@ _DEFAULT_CONFIG: dict[str, Any] = {
             "설명": ": 주관부서 귀속은 전표 발의 및 예산 통제 조직 기준이며, 실제 사용부서 귀속은 "
                     "업무 수행 및 비용 효익이 실질적으로 귀속되는 조직 기준.",
         },
+        # 섹션3-1 분류 행은 동적 리스트 — keyword 는 부서정보.csv 직간접구분 값 부분일치.
+        # 리스트 순서 = first-match-wins (위에서부터 먼저 일치한 분류로 집계).
         "section3_1": {
             "제목": "3-1. 직접비 공통비 분류 결과",
             "구분": "구분",
             "분류금액": "분류금액",
-            "직접비": "직접비",
-            "공통비": "공통비",
+            "rows": [
+                {"label": "직접비", "keyword": "직접"},
+                {"label": "공통비", "keyword": "공통"},
+            ],
         },
         "section3_2": {
             "제목": "3-2. 성격별 분류 결과",
@@ -173,6 +188,10 @@ def load_config() -> dict[str, Any]:
             return copy.deepcopy(_DEFAULT_CONFIG)
         _discard_legacy_section4(loaded)
         _normalize_section4_rows(loaded)
+        _normalize_account_table(loaded)
+        _normalize_section1(loaded)
+        _normalize_section2(loaded)
+        _normalize_section3_1(loaded)
         return _deep_merge(_DEFAULT_CONFIG, loaded)
     except Exception:
         return copy.deepcopy(_DEFAULT_CONFIG)
@@ -296,6 +315,175 @@ def _normalize_section4_rows(loaded: dict) -> None:
     for row in rows:
         if isinstance(row, dict) and "참조" in row and "참조_csv_column" not in row:
             del row["참조"]
+
+
+def _resolve_csv_col(loaded: dict, logical_key: str) -> str:
+    """논리 컬럼 키를 실제 CSV 컬럼명으로 변환한다 (구버전 → 신 스키마 마이그레이션용).
+
+    로드된 파일의 columns 맵이 우선한다 — 사용자가 예: 범위 컬럼을 리매핑했다면
+    마이그레이션된 csv_column 에도 그 값이 반영되어야 한다. 없으면 기본값으로 폴백.
+    """
+    cols = loaded.get("columns")
+    if isinstance(cols, dict):
+        v = cols.get(logical_key)
+        if isinstance(v, str) and v:
+            return v
+    return _DEFAULT_CONFIG["columns"].get(logical_key, logical_key)
+
+
+def _str_or(value: Any, default: str) -> str:
+    """비어 있지 않은 문자열이면 그대로, 아니면 default를 반환한다."""
+    return value if isinstance(value, str) and value else default
+
+
+def _sanitize_entry_list(sec: dict, list_key: str, required: tuple[str, ...]) -> None:
+    """신 스키마 리스트의 비정상 항목을 제거한다 (수기 편집 방어).
+
+    항목은 required 키를 모두 가진 dict 여야 한다. 값은 str 로 강제 변환한다.
+    전부 비정상이면 키 자체를 삭제하여 _deep_merge 가 기본 리스트를 공급하게 한다.
+    """
+    entries = sec.get(list_key)
+    if not isinstance(entries, list):
+        del sec[list_key]
+        return
+    cleaned: list[dict] = []
+    for e in entries:
+        if not (isinstance(e, dict) and all(k in e for k in required)):
+            continue
+        for k in required:
+            if not isinstance(e[k], str):
+                e[k] = str(e[k])
+        cleaned.append(e)
+    if cleaned:
+        sec[list_key] = cleaned
+    else:
+        del sec[list_key]
+
+
+def _normalize_account_table(loaded: dict) -> None:
+    """구버전(플랫) account_table 을 새 columns 리스트 스키마로 변환한다.
+
+    섹션4의 폐기 방식(_discard_legacy_section4)과 달리 변환 방식을 쓴다 — 구버전 플랫
+    dict 를 그대로 두면 _deep_merge 가 키 단위로 병합하여 잔여 키가 남고 사용자 라벨
+    커스터마이징이 조용히 무시되기 때문이다. 병합(_deep_merge) 전에 호출한다.
+    """
+    dl = loaded.get("display_labels")
+    if not isinstance(dl, dict):
+        return
+    sec = dl.get("account_table")
+    if not isinstance(sec, dict):
+        return
+    if "columns" in sec:
+        _sanitize_entry_list(sec, "columns", ("label", "csv_column"))
+        for legacy_key in ("계정코드", "계정명", "사업비코드", "채널구분"):
+            sec.pop(legacy_key, None)
+        return
+    # (구 라벨 키, 논리 컬럼 키, 기본 라벨, 폭 비율) — 기존 위치 매핑 그대로
+    legacy = [
+        ("계정코드",   "계정번호",   "계정코드",   1.0),
+        ("계정명",     "계정명",     "계정명",     1.5),
+        ("사업비코드", "계정그룹ID", "사업비 코드", 1.0),
+        ("채널구분",   "계정그룹명", "채널구분",   2.5),
+    ]
+    dl["account_table"] = {
+        "계정": _str_or(sec.get("계정"), "계정"),
+        "columns": [
+            {
+                "label": _str_or(sec.get(old_key), default_label),
+                "csv_column": _resolve_csv_col(loaded, logical),
+                "width": width,
+            }
+            for old_key, logical, default_label, width in legacy
+        ],
+    }
+
+
+def _normalize_section1(loaded: dict) -> None:
+    """구버전(플랫) section1 을 새 rows 리스트 스키마로 변환한다. 병합 전에 호출한다."""
+    dl = loaded.get("display_labels")
+    if not isinstance(dl, dict):
+        return
+    sec = dl.get("section1")
+    if not isinstance(sec, dict):
+        return
+    if "rows" in sec:
+        _sanitize_entry_list(sec, "rows", ("label", "csv_column"))
+        for legacy_key in ("대상정의", "범위", "지급대상", "산출기준"):
+            sec.pop(legacy_key, None)
+        return
+    # (구 라벨 키 = 기본 라벨, 논리 컬럼 키) — 범위/지급대상은 columns 맵 경유로 해석
+    legacy = [
+        ("대상정의", "대상정의"),
+        ("범위",     "범위"),
+        ("지급대상", "지급대상"),
+        ("산출기준", "산출기준"),
+    ]
+    dl["section1"] = {
+        "제목": _str_or(sec.get("제목"), "1. 대상정의"),
+        "rows": [
+            {
+                "label": _str_or(sec.get(old_key), old_key),
+                "csv_column": _resolve_csv_col(loaded, logical),
+            }
+            for old_key, logical in legacy
+        ],
+    }
+
+
+def _normalize_section2(loaded: dict) -> None:
+    """구버전 section2 의 주관/사용 라벨 쌍을 새 groups 리스트 스키마로 변환한다.
+
+    제목/귀속현황/부점명 등 공유 스칼라 키는 그대로 두고(_deep_merge 가 처리),
+    groups 만 생성한 뒤 구버전 라벨 키를 제거한다. 병합 전에 호출한다.
+    """
+    dl = loaded.get("display_labels")
+    if not isinstance(dl, dict):
+        return
+    sec = dl.get("section2")
+    if not isinstance(sec, dict):
+        return
+    if "groups" in sec:
+        _sanitize_entry_list(sec, "groups", ("label", "csv_column"))
+        sec.pop("주관부서귀속", None)
+        sec.pop("실제사용부서귀속", None)
+        return
+    sec["groups"] = [
+        {
+            "label": _str_or(sec.get("주관부서귀속"), "주관부서 귀속"),
+            "csv_column": _resolve_csv_col(loaded, "귀속_주관부서"),
+        },
+        {
+            "label": _str_or(sec.get("실제사용부서귀속"), "실제 사용부서 귀속"),
+            "csv_column": _resolve_csv_col(loaded, "귀속_사용부서"),
+        },
+    ]
+    sec.pop("주관부서귀속", None)
+    sec.pop("실제사용부서귀속", None)
+
+
+def _normalize_section3_1(loaded: dict) -> None:
+    """구버전 section3_1 의 직접비/공통비 라벨 쌍을 새 rows 리스트 스키마로 변환한다.
+
+    keyword 는 기존 로직의 부분일치 문자열("직접"/"공통")을 그대로 부여하여
+    분류 결과가 변하지 않도록 한다. 병합 전에 호출한다.
+    """
+    dl = loaded.get("display_labels")
+    if not isinstance(dl, dict):
+        return
+    sec = dl.get("section3_1")
+    if not isinstance(sec, dict):
+        return
+    if "rows" in sec:
+        _sanitize_entry_list(sec, "rows", ("label", "keyword"))
+        sec.pop("직접비", None)
+        sec.pop("공통비", None)
+        return
+    sec["rows"] = [
+        {"label": _str_or(sec.get("직접비"), "직접비"), "keyword": "직접"},
+        {"label": _str_or(sec.get("공통비"), "공통비"), "keyword": "공통"},
+    ]
+    sec.pop("직접비", None)
+    sec.pop("공통비", None)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:

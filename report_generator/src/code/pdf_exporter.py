@@ -96,14 +96,12 @@ _COLS_HEADER_TITLE_3 = [_WIDTH * 0.60, _WIDTH * 0.40] # 헤더 테이블: 타이
 _RENDER_DPI        = 150                               # 로고 사전 리사이즈 기준 DPI
 
 # ── 섹션별 컬럼 너비 ──────────────────────────────────────────────────────────
-# [C] 계정 테이블: 계정 | 계정코드 | 계정명 | 사업비코드 | 채널구분 (비율 1:1:1.5:1:2.5)
-_COLS_ACCT = [r / 7.0 * _WIDTH for r in [1.0, 1.0, 1.5, 1.0, 2.5]]
+# [C] 계정 테이블 너비는 _tbl_account에서 account_table.columns 의 width 비율로 동적 산출한다.
 
 # [D] 대상정의 2열: 라벨 22% | 데이터 78%
 _COLS_2 = [0.22 * _WIDTH, 0.78 * _WIDTH]
 
-# [E] 부점귀속 7열 테이블: 비율 1.2:1:1.2:0.8:1:1.2:0.8 (부점별 + 주관3 + 사용3)
-_COLS_7 = [r / 7.2 * _WIDTH for r in [1.2, 1.0, 1.2, 0.8, 1.0, 1.2, 0.8]]
+# [E] 부점귀속 테이블 너비는 _tbl_dept에서 section2.groups 수에 맞춰 동적 산출한다.
 
 # [G] 3-2 성격별 테이블 너비는 _tbl_nature_32에서 성격 컬럼 수에 맞춰 동적 산출한다.
 
@@ -206,8 +204,7 @@ def _styles(fn: str, fb: str, theme: CompanyTheme, labels: dict | None = None) -
 def _build_story(results: dict, s: dict, fn: str, fb: str, logo_max_height: int = 48,
                  logo_heights: list[int] | None = None) -> list:
     ai   = results.get('account_info', {})
-    d주관 = results['dept_주관']
-    d사용 = results['dept_사용']
+    dept_dfs = results['dept_groups']
     di   = results.get('direct_indirect', {})
     nat  = results['nature']
     cb   = results.get('classification_basis', {})
@@ -218,10 +215,10 @@ def _build_story(results: dict, s: dict, fn: str, fb: str, logo_max_height: int 
     story.append(_tbl_header(s, logo_max_height=logo_max_height, logo_heights=logo_heights));  story.append(gap)
     story.append(_tbl_account(ai, s));               story.append(gap)
     story.extend(_tbl_target(ai, s));                story.append(gap)
-    story.extend(_tbl_dept(d주관, d사용, s, fb));    story.append(gap)
+    story.extend(_tbl_dept(dept_dfs, s, fb));        story.append(gap)
     story.extend(_tbl_nature_31(di, s));             story.append(Spacer(1, 2))
     story.extend(_tbl_nature_32(nat, s, fb));        story.append(gap)
-    story.extend(_tbl_basis(cb, di, nat, s));        story.append(gap)
+    story.extend(_tbl_basis(cb, nat, s));            story.append(gap)
     story.append(_tbl_footer(s))
     return story
 
@@ -387,16 +384,15 @@ def _tbl_header(s: dict, logo_max_height: int = 48,
 # ── [C] 계정 헤더 테이블 ────────────────────────────────────────────────────
 
 def _tbl_account(ai: dict, s: dict) -> Table:
+    # 컬럼은 config account_table.columns 로 동적 구성 — 라벨/값은 csv_column 키로 조회.
+    # 기본 4컬럼(width 1:1.5:1:2.5)일 때 기존 _COLS_ACCT 고정 레이아웃과 동일하다.
     L = s['labels']['account_table']
+    cols_cfg = [c for c in L.get('columns', []) if isinstance(c, dict)]
     data = [
-        [_P(L['계정'], s['hdr']),      _P(L['계정코드'], s['hdr']),
-         _P(L['계정명'], s['hdr']), _P(L['사업비코드'], s['hdr']),
-         _P(L['채널구분'], s['hdr'])],
-        ['',
-         _P(ai.get('계정번호', ''), s['body']),
-         _P(ai.get('계정명', ''),   s['body']),
-         _P(ai.get('계정그룹ID', ''), s['body']),
-         _P(ai.get('계정그룹명', ''), s['body'])],
+        [_P(L['계정'], s['hdr'])]
+        + [_P(c.get('label', ''), s['hdr']) for c in cols_cfg],
+        ['']
+        + [_P(ai.get(c.get('csv_column', ''), ''), s['body']) for c in cols_cfg],
     ]
     cmds = _base_style() + [
         ('BACKGROUND', (0, 0), (-1, 0), s['c_primary']),        # 헤더행
@@ -404,97 +400,117 @@ def _tbl_account(ai: dict, s: dict) -> Table:
         ('SPAN',       (0, 0), (0, 1)),                          # 계정 셀 세로 병합
         ('BACKGROUND', (0, 0), (0, 1), s['c_primary']),          # SPAN 셀 전체 (덮어쓰기)
     ]
-    return Table(data, colWidths=_COLS_ACCT, style=TableStyle(cmds))
+    # 컬럼 너비: 계정 셀 1.0 + 컬럼별 width 비율(기본 1.0), 전체 _WIDTH 로 정규화
+    _ratios = [1.0] + [float(c.get('width') or 1.0) for c in cols_cfg]
+    _cols_w = [r / sum(_ratios) * _WIDTH for r in _ratios]
+    return Table(data, colWidths=_cols_w, style=TableStyle(cmds))
 
 
 # ── [D] 1. 대상정의 ────────────────────────────────────────────────────────────
 
 def _tbl_target(ai: dict, s: dict) -> list:
+    # 행은 config section1.rows 로 동적 구성 — 값은 csv_column 키로 조회.
     L = s['labels']['section1']
+    rows_cfg = [r for r in L.get('rows', []) if isinstance(r, dict)]
+    if not rows_cfg:
+        return [_P(L['제목'], s['sec'])]
     data = [
-        [_P(L['대상정의'], s['bold']), _P(ai.get('대상정의', ''), s['body'])],
-        [_P(L['범위'],     s['bold']), _P(ai.get('범위', ''),     s['body'])],
-        [_P(L['지급대상'], s['bold']), _P(ai.get('지급대상', ''), s['body'])],
-        [_P(L['산출기준'], s['bold']), _P(ai.get('산출기준', ''), s['body'])],
+        [_P(r.get('label', ''), s['bold']),
+         _P(ai.get(r.get('csv_column', ''), ''), s['body'])]
+        for r in rows_cfg
     ]
+    n = len(data)
     cmds = _base_style() + [
-        ('BACKGROUND', (0, 0), (0, 3), s['c_primary']),       # 라벨 셀
-        ('BACKGROUND', (1, 0), (1, 3), colors.white),         # 입력 셀: 흰색
+        ('BACKGROUND', (0, 0), (0, n - 1), s['c_primary']),   # 라벨 셀
+        ('BACKGROUND', (1, 0), (1, n - 1), colors.white),     # 입력 셀: 흰색
     ]
     return [_P(L['제목'], s['sec']), Table(data, colWidths=_COLS_2, style=TableStyle(cmds))]
 
 
 # ── [E] 2. 부점귀속 현황 ───────────────────────────────────────────────────────
 
-def _tbl_dept(d주관: pd.DataFrame, d사용: pd.DataFrame, s: dict, fb: str) -> list:
+def _tbl_dept(dept_dfs: list, s: dict, fb: str) -> list:
+    # 귀속 그룹은 config section2.groups 로 동적 구성 — 각 그룹이
+    # (부점명/대상금액/구성비) 3열 묶음을 이룬다. dept_dfs 는 processor 가
+    # 같은 groups 설정으로 계산한 그룹별 DataFrame 리스트 (순서 동일).
     L = s['labels']['section2']
-    n = max(len(d주관), len(d사용), 0)
-
-    data = [
-        # 행 0: 대분류 컬럼 헤더
-        [_P(L['귀속현황'], s['hdr']),
-         _P(L['주관부서귀속'], s['hdr']), None, None,
-         _P(L['실제사용부서귀속'], s['hdr']), None, None],
-        # 행 1: 소분류 컬럼 헤더
-        [None,
-         _P(L['부점명'], s['hdr']), _P(L['대상금액'], s['hdr']), _P(L['구성비'], s['hdr']),
-         _P(L['부점명'], s['hdr']), _P(L['대상금액'], s['hdr']), _P(L['구성비'], s['hdr'])],
-    ]
-
-    for i in range(n):
-        row = ['']
-        row += ([_P(str(d주관.iloc[i]['부서명']), s['body']),
-                 _P(_fmt(d주관.iloc[i]['대상금액']), s['right']),
-                 _P(_fmt(d주관.iloc[i]['구성비(%)']), s['right'])]
-                if i < len(d주관) else ['', '', ''])
-        row += ([_P(str(d사용.iloc[i]['부서명']), s['body']),
-                 _P(_fmt(d사용.iloc[i]['대상금액']), s['right']),
-                 _P(_fmt(d사용.iloc[i]['구성비(%)']), s['right'])]
-                if i < len(d사용) else ['', '', ''])
-        data.append(row)
-
-    tot_idx = len(data)
-    data.append([
-        _P(L['총계'], s['hdr']), '',
-        _P(_fmt(d주관['대상금액'].sum()), s['right']), '',
-        '', _P(_fmt(d사용['대상금액'].sum()), s['right']), '',
-    ])
-
-    cmds = _base_style() + [
-        ('SPAN', (0, 0), (0, 1)),   # 부점별 rowspan=2
-        ('SPAN', (1, 0), (3, 0)),   # 주관부서 귀속 colspan=3
-        ('SPAN', (4, 0), (6, 0)),   # 실제 사용부서 귀속 colspan=3
-        # 헤더 행 0-1: 포인트 색상
-        ('BACKGROUND', (0, 0), (6, 1), s['c_primary']),
-        # 총계 행: 라벨 흰색 / 나머지 노란색
-        ('BACKGROUND', (0, tot_idx), (0, tot_idx), colors.white),
-        ('BACKGROUND', (1, tot_idx), (6, tot_idx), colors.white),
-        ('FONTNAME',   (0, tot_idx), (6, tot_idx), fb),
-        ('ALIGN',      (0, 0), (0, 1), 'CENTER'),
-    ]
-
-    # 데이터 행: 노란색 (데이터가 있을 때만)
-    if n > 0:
-        cmds.append(('BACKGROUND', (0, 2), (6, tot_idx - 1), colors.white))
+    groups = [g for g in L.get('groups', []) if isinstance(g, dict)]
+    pairs = list(zip(groups, dept_dfs))   # 길이 불일치 시 짧은 쪽 기준 (방어적)
 
     title = _P(L['제목'], s['sec'])
     desc  = _P(L['설명'], s['small'])
-    return [title, desc, Table(data, colWidths=_COLS_7, style=TableStyle(cmds))]
+    if not pairs:
+        return [title, desc]
+
+    G = len(pairs)
+    last = 3 * G                          # 마지막 컬럼 인덱스 (0=귀속현황 + 그룹당 3열)
+    n = max(len(df) for _, df in pairs)
+
+    # 행 0: 대분류 컬럼 헤더 (그룹 라벨, colspan=3) / 행 1: 소분류 컬럼 헤더
+    row0: list = [_P(L['귀속현황'], s['hdr'])]
+    row1: list = [None]
+    for g, _ in pairs:
+        row0 += [_P(g.get('label', ''), s['hdr']), None, None]
+        row1 += [_P(L['부점명'], s['hdr']), _P(L['대상금액'], s['hdr']), _P(L['구성비'], s['hdr'])]
+    data = [row0, row1]
+
+    for i in range(n):
+        row = ['']
+        for _, df in pairs:
+            row += ([_P(str(df.iloc[i]['부서명']), s['body']),
+                     _P(_fmt(df.iloc[i]['대상금액']), s['right']),
+                     _P(_fmt(df.iloc[i]['구성비(%)']), s['right'])]
+                    if i < len(df) else ['', '', ''])
+        data.append(row)
+
+    tot_idx = len(data)
+    tot_row: list = [_P(L['총계'], s['hdr'])]
+    for _, df in pairs:
+        tot_row += ['', _P(_fmt(df['대상금액'].sum()), s['right']), '']
+    data.append(tot_row)
+
+    cmds = _base_style() + [
+        ('SPAN', (0, 0), (0, 1)),   # 부점별 rowspan=2
+        # 헤더 행 0-1: 포인트 색상
+        ('BACKGROUND', (0, 0), (last, 1), s['c_primary']),
+        # 총계 행: 라벨 흰색 / 나머지 노란색
+        ('BACKGROUND', (0, tot_idx), (0, tot_idx), colors.white),
+        ('BACKGROUND', (1, tot_idx), (last, tot_idx), colors.white),
+        ('FONTNAME',   (0, tot_idx), (last, tot_idx), fb),
+        ('ALIGN',      (0, 0), (0, 1), 'CENTER'),
+    ]
+    for gi in range(G):
+        cmds.append(('SPAN', (1 + 3 * gi, 0), (3 + 3 * gi, 0)))   # 그룹 라벨 colspan=3
+
+    # 데이터 행: 노란색 (데이터가 있을 때만)
+    if n > 0:
+        cmds.append(('BACKGROUND', (0, 2), (last, tot_idx - 1), colors.white))
+
+    # 컬럼 너비: 귀속현황 1.2 + 그룹당 (1.0, 1.2, 0.8), 전체 _WIDTH 로 정규화.
+    # G=2 일 때 기존 _COLS_7 고정 레이아웃과 동일하다.
+    _ratios = [1.2] + [1.0, 1.2, 0.8] * G
+    _cols_w = [r / sum(_ratios) * _WIDTH for r in _ratios]
+    return [title, desc, Table(data, colWidths=_cols_w, style=TableStyle(cmds))]
 
 
 # ── [F] 3. 사업비 분류 + 3-1. 직접비/공통비 분류 결과 ────────────────────
 
 def _tbl_nature_31(di: dict, s: dict) -> list:
+    # 분류 행은 processor.calc_direct_indirect 가 config section3_1.rows 로 계산한
+    # di['rows'] 를 그대로 렌더 — 라벨/금액을 같은 항목에서 읽어 순서 재매칭이 없다.
     L = s['labels']['section3_1']
-    data = [
-        [_P(L['구분'], s['hdr']), _P(L['분류금액'], s['hdr'])],
-        [_P(L['직접비'], s['bold']), _P(_fmt(di.get('직접비', 0)), s['right'])],
-        [_P(L['공통비'], s['bold']), _P(_fmt(di.get('공통비', 0)), s['right'])],
+    di_rows = [r for r in di.get('rows', []) if isinstance(r, dict)]
+    if not di_rows:
+        return [_P(L['제목'], s['sec'])]
+    data = [[_P(L['구분'], s['hdr']), _P(L['분류금액'], s['hdr'])]] + [
+        [_P(r.get('label', ''), s['bold']), _P(_fmt(r.get('amount', 0)), s['right'])]
+        for r in di_rows
     ]
+    n = len(di_rows)
     cmds = _base_style() + [
         ('BACKGROUND', (0, 0), (1, 0), s['c_primary']),       # 헤더행
-        ('BACKGROUND', (0, 1), (0, 2), s['c_primary']),       # 라벨(직접비/공통비)
-        ('BACKGROUND', (1, 1), (1, 2), colors.white),         # 값 셀: 흰색
+        ('BACKGROUND', (0, 1), (0, n), s['c_primary']),       # 분류 라벨 셀
+        ('BACKGROUND', (1, 1), (1, n), colors.white),         # 값 셀: 흰색
     ]
     return [
         _P(L['제목'], s['sec']),
@@ -570,7 +586,7 @@ def _tbl_nature_32(nat: pd.DataFrame, s: dict, fb: str) -> list:
 
 # ── [H] 4. 분류 근거 ───────────────────────────────────────────────────────────
 
-def _tbl_basis(cb: dict, di: dict, nat: pd.DataFrame, s: dict) -> list:
+def _tbl_basis(cb: dict, nat: pd.DataFrame, s: dict) -> list:
     # 타입별 동적 행 렌더러 — config display_labels.section4.rows 기준.
     #   직공통비   : cb의 직접비/공통비 근거 (legacy 로직)
     #   성격별분류 : 부점 데이터 절댓값 합 필터링 (legacy 로직)
