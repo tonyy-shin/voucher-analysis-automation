@@ -62,6 +62,29 @@ def _fmt_slot_label(path: str | None) -> str:
     return name if len(name) <= 30 else "..." + name[-27:]
 
 
+# ── 필수 컬럼 삭제 가드 ────────────────────────────────────────────────────────
+# JOIN 키·분류 기준으로 파이프라인이 구조적으로 의존하는 컬럼 — 어떤 동적 행
+# 편집기에서도 이 컬럼을 가리키는 행은 삭제할 수 없다 (라벨/값 편집은 자유).
+_REQUIRED_LOGICAL_KEYS: tuple[str, ...] = (
+    "원가요소", "코스트센터", "계정번호", "cc_code", "직간접구분", "팀", "출력전표",
+)
+
+
+def _build_required_columns(config: dict) -> set[str]:
+    """config['columns'] 매핑을 반영해 실제 필수 컬럼명 집합을 만든다.
+
+    columns: 매핑은 GUI가 없어 사용자가 YAML을 직접 고칠 수 있으므로, 로직 키의
+    리터럴 기본값이 아니라 현재 config 값을 기준으로 매번 계산한다 — 그래야
+    예: cc_code 를 다른 실제 헤더명으로 재매핑해도 가드가 계속 유효하다.
+    """
+    cols = config.get("columns", {})
+    return {str(cols.get(k, k)).strip() for k in _REQUIRED_LOGICAL_KEYS}
+
+
+def _is_required_column(value: str, required_columns: set[str]) -> bool:
+    return value.strip() in required_columns
+
+
 def _make_rows_editor(
     parent: tk.Frame,
     dlg: tk.Toplevel,
@@ -70,6 +93,8 @@ def _make_rows_editor(
     new_row,
     min_rows: int = 1,
     section_name: str = "항목",
+    guard_field: str | None = None,
+    required_columns: set[str] | None = None,
 ):
     """동적 행 편집기 팩토리 — 균일한 dict 행 리스트(계정 테이블/섹션1/2/3-1) 공용.
 
@@ -87,6 +112,11 @@ def _make_rows_editor(
         new_row:      "+ 추가" 시 append 할 새 행 dict 를 반환하는 콜러블
         min_rows:     최소 행 수 (삭제 가드)
         section_name: 경고 메시지에 표시할 섹션명
+        guard_field:  이 행이 CSV 컬럼을 가리키는 필드 키 (예: "csv_column").
+                      None이면 필수 컬럼 삭제 가드를 적용하지 않는다 (예: 섹션3-1의
+                      "keyword"는 컬럼명이 아닌 값 부분일치 문자열이라 대상이 아님).
+        required_columns: 필수 컬럼명 집합 (_build_required_columns 결과).
+                      guard_field가 주어지면 필수로 함께 전달해야 한다.
 
     Returns:
         (frame, flush, render, add) — 호출부가 frame 을 배치하고 render()를 1회 호출한다.
@@ -101,6 +131,15 @@ def _make_rows_editor(
                 row[key] = var.get()
 
     def _delete(idx: int) -> None:
+        if guard_field is not None and idx < len(vars_list):
+            live_val = vars_list[idx][guard_field].get()
+            if _is_required_column(live_val, required_columns or set()):
+                messagebox.showwarning(
+                    "삭제 불가",
+                    f"{section_name}의 필수 컬럼(\"{live_val.strip()}\")은 삭제할 수 없습니다.",
+                    parent=dlg,
+                )
+                return
         if len(rows_state) <= min_rows:
             messagebox.showwarning(
                 "최소 개수",
@@ -120,15 +159,30 @@ def _make_rows_editor(
             rf = tk.Frame(frame)
             rf.grid(row=idx, column=0, sticky="w", padx=8, pady=2)
             var_map: dict[str, tk.StringVar] = {}
+            guard_var: tk.StringVar | None = None
             for key, caption, width in fields:
                 tk.Label(rf, text=caption).pack(side="left", padx=(4, 2))
                 v = tk.StringVar(value=str(row.get(key, "")))
                 var_map[key] = v
                 tk.Entry(rf, textvariable=v, width=width).pack(side="left")
-            tk.Button(
+                if key == guard_field:
+                    guard_var = v
+            del_btn = tk.Button(
                 rf, text="삭제", width=5,
                 command=(lambda i=idx: _delete(i)),
-            ).pack(side="left", padx=(4, 0))
+            )
+            del_btn.pack(side="left", padx=(4, 0))
+            hint_lbl = tk.Label(rf, text="", fg="#888888", font=("맑은 고딕", 8))
+            hint_lbl.pack(side="left", padx=(4, 0))
+
+            if guard_var is not None:
+                def _update_lock(*_args, v=guard_var, btn=del_btn, hint=hint_lbl) -> None:
+                    locked = _is_required_column(v.get(), required_columns or set())
+                    btn.configure(state=(tk.DISABLED if locked else tk.NORMAL))
+                    hint.configure(text="(필수 컬럼 — 삭제 불가)" if locked else "")
+                guard_var.trace_add("write", _update_lock)
+                _update_lock()
+
             vars_list.append(var_map)
 
     def add() -> None:
@@ -158,6 +212,10 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
 
     # display_labels 누락 방어 (정상 흐름에서는 load_config가 채워 줌)
     config.setdefault("display_labels", default_display_labels())
+
+    # 필수 컬럼 삭제 가드용 — config["columns"] 매핑 기준으로 1회 계산 (다이얼로그가
+    # 열려 있는 동안 columns 매핑은 바뀌지 않으므로 재계산 불필요).
+    required_columns = _build_required_columns(config)
 
     dlg = tk.Toplevel(root)
     dlg.title("포인트 색상·로고·문구 설정")
@@ -410,6 +468,9 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
     nature_vars: list[tk.StringVar] = [
         tk.StringVar(value=str(x)) for x in config.get("nature_cols", [])
     ]
+    # 필수 컬럼 삭제 가드 스냅샷 — 다이얼로그 오픈 시점의 객체 참조를 보존한다
+    # (저장 시 defense-in-depth 검증에서 사용; 편집은 in-place라 객체 동일성 유지됨).
+    _nature_locked_snapshot = [v for v in nature_vars if _is_required_column(v.get(), required_columns)]
     nature_frame = tk.Frame(_lbl_inner)   # section3_2 블록 내부에 grid 됨
     add_var = tk.StringVar()
 
@@ -423,12 +484,30 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             tk.Entry(nature_frame, textvariable=var, width=40).grid(
                 row=idx, column=1, padx=(0, 4), pady=2, sticky="ew"
             )
-            tk.Button(
+            del_btn = tk.Button(
                 nature_frame, text="삭제", width=5,
                 command=(lambda i=idx: _delete_nature(i)),
-            ).grid(row=idx, column=2, padx=(0, 8), pady=2)
+            )
+            del_btn.grid(row=idx, column=2, padx=(0, 4), pady=2)
+            hint_lbl = tk.Label(nature_frame, text="", fg="#888888", font=("맑은 고딕", 8))
+            hint_lbl.grid(row=idx, column=3, padx=(0, 8), pady=2, sticky="w")
+
+            def _update_lock(*_args, v=var, btn=del_btn, hint=hint_lbl) -> None:
+                locked = _is_required_column(v.get(), required_columns)
+                btn.configure(state=(tk.DISABLED if locked else tk.NORMAL))
+                hint.configure(text="(필수 컬럼 — 삭제 불가)" if locked else "")
+            var.trace_add("write", _update_lock)
+            _update_lock()
 
     def _delete_nature(idx: int):
+        live_val = nature_vars[idx].get()
+        if _is_required_column(live_val, required_columns):
+            messagebox.showwarning(
+                "삭제 불가",
+                f"필수 컬럼(\"{live_val.strip()}\")은 삭제할 수 없습니다.",
+                parent=dlg,
+            )
+            return
         if len(nature_vars) <= 1:
             messagebox.showwarning(
                 "최소 1개", "성격 컬럼은 최소 1개 이상이어야 합니다.", parent=dlg
@@ -453,6 +532,12 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
     basis_rows_state: list[dict] = copy.deepcopy(
         config["display_labels"]["section4"].get("rows", [])
     )
+    # 필수 컬럼 삭제 가드 스냅샷 — custom 타입 행의 csv_column만 대상 (직공통비/성격별분류는
+    # 사용자 편집 가능한 csv_column 필드가 없음).
+    _basis_locked_snapshot = [
+        r for r in basis_rows_state
+        if r.get("type") == "custom" and _is_required_column(str(r.get("csv_column", "")), required_columns)
+    ]
     basis_vars: list[dict[str, tk.StringVar]] = []   # basis_rows_state와 인덱스 정렬
     basis_frame = tk.Frame(_lbl_inner)               # _label_groups 루프 후 grid 됨
 
@@ -484,6 +569,7 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             var_map["label"] = v_label
             tk.Entry(rf, textvariable=v_label, width=14).pack(side="left")
 
+            v_csv: tk.StringVar | None = None
             if row_type == "custom":
                 tk.Label(rf, text="근거 텍스트 컬럼").pack(side="left", padx=(4, 2))
                 v_csv = tk.StringVar(value=str(row.get("csv_column", "")))
@@ -495,14 +581,33 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             var_map["참조_csv_column"] = v_ref
             tk.Entry(rf, textvariable=v_ref, width=12).pack(side="left")
 
-            tk.Button(
+            del_btn = tk.Button(
                 rf, text="삭제", width=5,
                 command=(lambda i=idx: _delete_basis_row(i)),
-            ).pack(side="left", padx=(4, 0))
+            )
+            del_btn.pack(side="left", padx=(4, 0))
+            hint_lbl = tk.Label(rf, text="", fg="#888888", font=("맑은 고딕", 8))
+            hint_lbl.pack(side="left", padx=(4, 0))
+
+            if v_csv is not None:
+                def _update_lock(*_args, v=v_csv, btn=del_btn, hint=hint_lbl) -> None:
+                    locked = _is_required_column(v.get(), required_columns)
+                    btn.configure(state=(tk.DISABLED if locked else tk.NORMAL))
+                    hint.configure(text="(필수 컬럼 — 삭제 불가)" if locked else "")
+                v_csv.trace_add("write", _update_lock)
+                _update_lock()
 
             basis_vars.append(var_map)
 
     def _delete_basis_row(idx: int):
+        live_csv = basis_vars[idx].get("csv_column") if idx < len(basis_vars) else None
+        if live_csv is not None and _is_required_column(live_csv.get(), required_columns):
+            messagebox.showwarning(
+                "삭제 불가",
+                f"필수 컬럼(\"{live_csv.get().strip()}\")은 삭제할 수 없습니다.",
+                parent=dlg,
+            )
+            return
         _flush_basis_vars()
         del basis_rows_state[idx]
         _render_basis_rows()
@@ -529,23 +634,38 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
     sec2_groups_state: list[dict] = copy.deepcopy(_dl["section2"].get("groups", []))
     sec31_rows_state: list[dict] = copy.deepcopy(_dl["section3_1"].get("rows", []))
 
+    # 필수 컬럼 삭제 가드 스냅샷 — 다이얼로그 오픈 시점의 객체 참조를 보존한다 (저장 시
+    # defense-in-depth 검증용). 섹션3-1은 keyword가 컬럼명이 아니라 가드 대상이 아님.
+    _acct_locked_snapshot = [
+        r for r in acct_cols_state if _is_required_column(str(r.get("csv_column", "")), required_columns)
+    ]
+    _sec1_locked_snapshot = [
+        r for r in sec1_rows_state if _is_required_column(str(r.get("csv_column", "")), required_columns)
+    ]
+    _sec2_locked_snapshot = [
+        r for r in sec2_groups_state if _is_required_column(str(r.get("csv_column", "")), required_columns)
+    ]
+
     acct_frame, acct_flush, acct_render, acct_add = _make_rows_editor(
         _lbl_inner, dlg, acct_cols_state,
         [("label", "라벨", 14), ("csv_column", "계정정보 컬럼", 16)],
         lambda: {"label": "", "csv_column": ""},
         section_name="계정 테이블 컬럼",
+        guard_field="csv_column", required_columns=required_columns,
     )
     sec1_frame, sec1_flush, sec1_render, sec1_add = _make_rows_editor(
         _lbl_inner, dlg, sec1_rows_state,
         [("label", "라벨", 14), ("csv_column", "계정정보 컬럼", 16)],
         lambda: {"label": "", "csv_column": ""},
         section_name="대상정의 행",
+        guard_field="csv_column", required_columns=required_columns,
     )
     sec2_frame, sec2_flush, sec2_render, sec2_add = _make_rows_editor(
         _lbl_inner, dlg, sec2_groups_state,
         [("label", "라벨", 16), ("csv_column", "출력.csv 부서 컬럼", 14)],
         lambda: {"label": "", "csv_column": ""},
         section_name="귀속 그룹",
+        guard_field="csv_column", required_columns=required_columns,
     )
     sec31_frame, sec31_flush, sec31_render, sec31_add = _make_rows_editor(
         _lbl_inner, dlg, sec31_rows_state,
@@ -754,6 +874,28 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
                 for k, v in row.items():
                     if isinstance(v, str):
                         row[k] = v.strip()
+
+        # 0-3) 필수 컬럼 삭제 방어 (defense in depth) — 삭제 가드가 정상 동작했다면
+        # 이 검사는 항상 통과한다. 다이얼로그 오픈 시점에 필수 컬럼과 일치했던 행(객체)이
+        # 현재 리스트에서 사라졌는지 객체 동일성으로 확인한다 (값 편집만으로는 사라지지
+        # 않음 — flush/render는 같은 객체를 in-place로 변형하므로).
+        _locked_snapshots = [
+            ("계정 테이블 컬럼", _acct_locked_snapshot, acct_cols_state),
+            ("대상정의(1) 행", _sec1_locked_snapshot, sec1_rows_state),
+            ("부점귀속(2) 그룹", _sec2_locked_snapshot, sec2_groups_state),
+            ("성격 컬럼(3-2)", _nature_locked_snapshot, nature_vars),
+            ("분류 근거(4) 커스텀 행", _basis_locked_snapshot, basis_rows_state),
+        ]
+        for sec_name, snapshot, current_list in _locked_snapshots:
+            missing = [row for row in snapshot if row not in current_list]
+            if missing:
+                messagebox.showwarning(
+                    "삭제 불가",
+                    f"{sec_name}의 필수 컬럼 항목이 삭제되었습니다.\n"
+                    "편집을 취소하거나 다시 추가한 뒤 저장하세요.",
+                    parent=dlg,
+                )
+                return
 
         valid_paths = [p for p in slots if p]
         new_theme = CompanyTheme(
