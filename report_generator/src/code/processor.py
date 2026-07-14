@@ -155,8 +155,8 @@ def enrich_data(
     3중 LEFT JOIN으로 트랜잭션 데이터에 마스터 정보를 결합하고 대상금액을 계산한다.
 
     JOIN 순서:
-        JOIN 1: (코스트센터)  ↔ (Cost Center Code) → 팀·직간접구분 추가 (부서정보)
-        JOIN 2: (원가요소)    ↔ (계정번호)          → 계정명·계정그룹명·사용부서·비용 지급 범위·산출기준 추가
+        JOIN 1: (코스트센터)  ↔ (Cost Center Code) → 팀 추가 (부서정보)
+        JOIN 2: (원가요소)    ↔ (계정번호)          → 계정명·계정그룹명·사용부서·비용 지급 범위·산출기준·직간접구분 추가 (계정정보)
         JOIN 3: (원가요소)    ↔ (출력전표)           → 귀속_주관부서·귀속_사용부서 추가
 
     JOIN 후 처리:
@@ -181,7 +181,7 @@ def enrich_data(
 
     df = df_filtered.copy()
 
-    # ── JOIN 1: 코스트 센터 → 직간접구분 ─────────────────────────────────
+    # ── JOIN 1: 코스트 센터 → 팀 (부점귀속용) ────────────────────────────
     if not df_ccm.empty and _cc_right in df_ccm.columns:
         df = df.merge(
             df_ccm,
@@ -232,7 +232,7 @@ def enrich_data(
 
     # JOIN 후 텍스트 결측치 처리
     text_fill_cols = [
-        COLUMN_MAP["직간접구분"],       # 직간접구분 (부서정보)
+        COLUMN_MAP["직간접구분"],       # 직간접구분 (계정정보)
         COLUMN_MAP["계정명"],           # 계정명
         COLUMN_MAP["계정그룹명"],       # 계정그룹명
         COLUMN_MAP["대상정의"],         # 대상정의
@@ -379,7 +379,8 @@ def calc_direct_indirect(
     """
     직간접구분 키워드 분류별 합계 및 총계를 계산한다.
 
-    분류 기준은 부서정보.csv의 '직간접구분' 컬럼 (코스트센터 JOIN으로 결합).
+    분류 기준은 계정정보.csv의 '직간접구분' 컬럼 (원가요소↔계정번호 JOIN 2로 결합).
+    직간접구분은 부서가 아니라 계정과목 단위로 결정된다.
     각 분류의 keyword 를 str.contains(regex=False)로 부분 일치 매칭하여
     값 표기 방식 변형(예: '직접비', '직접 비용')에도 대응한다.
     리스트 순서 = first-match-wins: 이미 위쪽 분류에 잡힌 행은 제외되므로,
@@ -402,7 +403,7 @@ def calc_direct_indirect(
 
     총계 = float(df_enriched["대상금액"].sum())
 
-    # 직간접 구분 기준 = 부서정보 '직간접구분' 컬럼
+    # 직간접 구분 기준 = 계정정보 '직간접구분' 컬럼 (계정과목 단위)
     col = COLUMN_MAP["직간접구분"]
 
     if col not in df_enriched.columns:

@@ -44,9 +44,9 @@ COLUMN_MAP: dict[str, str] = {
     "범위":               "사용 부서",
     "지급대상":           "비용 지급 범위",
     "산출기준":           "산출기준",
+    "직간접구분":         "직간접구분",   # 계정정보.csv (원가요소↔계정번호 JOIN으로 3-1 분류에 사용)
     # 부서정보.csv 컬럼
     "cc_code":            "Cost Center Code",
-    "직간접구분":         "직간접구분",
     "팀":                 "팀",
     # 출력.csv 컬럼
     "출력전표":           "출력전표",
@@ -83,17 +83,18 @@ _REQUIRED_TRANSACTION_COLS: list[str] = [
 
 _REQUIRED_CCM_COLS: list[str] = [
     COLUMN_MAP["cc_code"],     # JOIN 1 키
-    COLUMN_MAP["직간접구분"],  # 직간접 분류 기준
+    COLUMN_MAP["팀"],          # 부점귀속(섹션3)용 팀
 ]
 
 _REQUIRED_ACCOUNT_COLS: list[str] = [
     COLUMN_MAP["계정번호"],    # JOIN 2 키
+    COLUMN_MAP["직간접구분"],  # 3-1 직간접 분류 기준 (계정과목 단위)
 ]
 
 
 # ── 데이터셋에서 실제로 필요한 컬럼 목록 ──────────────────────────────────────
 def _get_ccm_cols_needed() -> list[str]:
-    return [COLUMN_MAP["cc_code"], COLUMN_MAP["팀"], COLUMN_MAP["직간접구분"]]
+    return [COLUMN_MAP["cc_code"], COLUMN_MAP["팀"]]
 
 
 def _get_account_cols_needed() -> list[str]:
@@ -106,6 +107,7 @@ def _get_account_cols_needed() -> list[str]:
         COLUMN_MAP["범위"],
         COLUMN_MAP["지급대상"],
         COLUMN_MAP["산출기준"],
+        COLUMN_MAP["직간접구분"],   # 3-1 직간접 분류 기준
     ]
     # 사용자가 account_table/section1 에 추가한 컬럼 — 여기서 빠지면
     # _preprocess_account 의 컬럼 선별에 잘려 PDF에 조용히 빈 칸이 출력된다.
@@ -150,8 +152,8 @@ def _apply_config_overrides(config: dict | None) -> None:
 
     # COLUMN_MAP 변경 반영 — 필수 컬럼 목록 재구성
     _REQUIRED_TRANSACTION_COLS = [COLUMN_MAP["원가요소"], COLUMN_MAP["코스트센터"]]
-    _REQUIRED_CCM_COLS         = [COLUMN_MAP["cc_code"],  COLUMN_MAP["직간접구분"]]
-    _REQUIRED_ACCOUNT_COLS     = [COLUMN_MAP["계정번호"]]
+    _REQUIRED_CCM_COLS         = [COLUMN_MAP["cc_code"],  COLUMN_MAP["팀"]]
+    _REQUIRED_ACCOUNT_COLS     = [COLUMN_MAP["계정번호"], COLUMN_MAP["직간접구분"]]
 
     # display_labels 동적 리스트 → 파생 컬럼 목록 (in-place 갱신, NATURE_COLS 패턴)
     dl = config.get("display_labels")

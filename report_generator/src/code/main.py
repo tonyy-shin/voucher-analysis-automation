@@ -705,7 +705,7 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             r, "※ 출력.csv의 부서 목록 컬럼명. 위쪽 그룹이 우선 귀속됩니다.",
             sec2_frame, sec2_render, sec2_add, "+ 그룹 추가"),
         "3-1. 직접비 공통비 분류 결과": lambda r: _mount_rows_editor(
-            r, "※ 부서정보.csv 직간접구분 값 부분일치. 위에서부터 먼저 일치한 분류로 "
+            r, "※ 계정정보.csv 직간접구분 값 부분일치. 위에서부터 먼저 일치한 분류로 "
                "집계됩니다. (섹션4 '직공통비' 근거 문구와는 별개입니다.)",
             sec31_frame, sec31_render, sec31_add, "+ 분류 추가"),
     }
@@ -1234,16 +1234,45 @@ def main() -> None:
         if c and c not in _out_available
     ]
 
-    # 섹션3-1 키워드 중 부서정보.csv 직간접구분 값에 전혀 일치하지 않는 키워드
+    # 섹션3-1 키워드 중 계정정보.csv 직간접구분 값에 전혀 일치하지 않는 키워드
     _gubun_col = COLUMN_MAP["직간접구분"]
-    _df_ccm = sheets[data_loader._SHEET_CCM]
+    _df_account = sheets[data_loader._SHEET_ACCOUNT]
     unmatched_keywords: list[str] = []
-    if _gubun_col in _df_ccm.columns:
-        _gubun_series = _df_ccm[_gubun_col].astype(str)
+    if _gubun_col in _df_account.columns:
+        _gubun_series = _df_account[_gubun_col].astype(str)
         for e in _cfg_entries("section3_1", "rows"):
             kw = str(e.get("keyword", ""))
             if kw and not _gubun_series.str.contains(kw, na=False, regex=False).any():
                 unmatched_keywords.append(kw)
+
+    # ── 3-1 직간접구분 매핑 누락 검출 (조용한 오분류 방지) ──────────────────────
+    # 두 원인 모두 enrich 후 "(미매칭)"으로 채워져 직접비/공통비 어디에도 집계되지
+    # 않으면서 총계에는 포함된다("분류 합 ≠ 총계"). 실제 값은 강제하지 않고 목록만 알린다.
+    _acct_col = COLUMN_MAP["계정번호"]
+    _tx_col   = COLUMN_MAP["원가요소"]
+    _df_tx    = sheets[data_loader._SHEET_TRANSACTION]
+
+    # 케이스 1: 계정정보에는 있으나 직간접구분 값이 빈 계정번호
+    unmapped_gubun_accounts: list[str] = []
+    if _gubun_col in _df_account.columns and _acct_col in _df_account.columns:
+        _g = _df_account[_gubun_col]
+        _blank = _g.isna() | _g.astype(str).str.strip().isin(
+            ["", "nan", "None", data_loader.FALLBACK_TEXT]
+        )
+        unmapped_gubun_accounts = (
+            _df_account.loc[_blank, _acct_col].astype(str).str.strip()
+            .loc[lambda s: s != ""].drop_duplicates().tolist()
+        )
+
+    # 케이스 2: 사업비정보 원가요소가 계정정보에 아예 없음 (계정 키 차집합)
+    missing_account_codes: list[str] = []
+    if _tx_col in _df_tx.columns and _acct_col in _df_account.columns:
+        _acct_keys = set(_df_account[_acct_col].astype(str).str.strip())
+        missing_account_codes = (
+            _df_tx[_tx_col].astype(str).str.strip()
+            .loc[lambda s: (s != "") & ~s.isin(_acct_keys)]
+            .drop_duplicates().tolist()
+        )
 
     # (경고 섹션 제목, 부연 설명, 항목 리스트) — _show_summary_dialog 가 ⚠️ 블록으로 렌더
     config_warnings: list[tuple[str, str, list[str]]] = []
@@ -1267,9 +1296,23 @@ def main() -> None:
         ))
     if unmatched_keywords:
         config_warnings.append((
-            "일치 부서 없는 분류 키워드 (섹션3-1)",
-            "직간접구분 값에 일치하는 부서가 없어 0원으로 출력됩니다",
+            "일치 계정 없는 분류 키워드 (섹션3-1)",
+            "직간접구분 값에 일치하는 계정이 없어 0원으로 출력됩니다",
             unmatched_keywords,
+        ))
+    if missing_account_codes:
+        config_warnings.append((
+            "계정정보에 없는 원가요소 (섹션3-1)",
+            "계정정보.csv에 매칭 계정번호가 없어 직간접구분을 못 얻습니다 — "
+            "해당 금액이 직접비/공통비 어디에도 집계되지 않습니다 (총계에는 포함)",
+            missing_account_codes,
+        ))
+    if unmapped_gubun_accounts:
+        config_warnings.append((
+            "직간접구분 미입력 계정번호 (섹션3-1)",
+            "계정정보.csv에 있으나 직간접구분 값이 비어 있어 해당 계정 금액이 "
+            "직접비/공통비 어디에도 집계되지 않습니다 (총계에는 포함)",
+            unmapped_gubun_accounts,
         ))
 
     # ── Step 5: 출력전표 코드 목록 수집 (출력.csv의 출력전표 컬럼에서) ──────────

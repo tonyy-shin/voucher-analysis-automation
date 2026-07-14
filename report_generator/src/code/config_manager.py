@@ -41,9 +41,9 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "범위":        "사용 부서",
         "지급대상":    "비용 지급 범위",
         "산출기준":    "산출기준",
+        "직간접구분":  "직간접구분",   # 계정정보.csv (3-1 직간접 분류 기준)
         # 부서정보.csv
         "cc_code":     "Cost Center Code",
-        "직간접구분":  "직간접구분",
         "팀":          "팀",
         # 출력.csv
         "출력전표":     "출력전표",
@@ -143,8 +143,8 @@ _DEFAULT_CONFIG: dict[str, Any] = {
 # JOIN 키 및 집계 필수 컬럼만 — 선택적 컬럼 누락은 오탐이므로 제외
 _CSV_REQUIRED_COLS: dict[str, list[str]] = {
     "transaction": ["원가요소", "코스트센터"],
-    "account":     ["계정번호"],
-    "ccm":         ["cc_code", "직간접구분", "팀"],
+    "account":     ["계정번호", "직간접구분"],
+    "ccm":         ["cc_code", "팀"],
     "output":      ["출력전표"],
 }
 
