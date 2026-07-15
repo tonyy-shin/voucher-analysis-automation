@@ -35,6 +35,7 @@ COLUMN_MAP: dict[str, str] = {
     # 사업비정보.csv 컬럼
     "원가요소":           "원가요소",
     "코스트센터":         "코스트센터",
+    "주관부서":           "주관부서",   # 사업비정보.csv (라인별 주관부서 = 전표 발의·예산 통제 조직)
     # 계정정보.csv 컬럼
     "계정번호":           "계정번호",
     "계정명":             "계정명",
@@ -193,8 +194,9 @@ def check_unregistered_teams(file_paths: dict, config: dict | None = None) -> li
     Set A: 사업비정보의 코스트센터 → 부서정보 JOIN으로 얻은 팀.
            코스트센터가 부서정보에 없으면 "(미매칭:{코스트센터코드})"로 포함하여
            등록되지 않은 코스트센터도 미등록 경고에 잡히도록 한다.
-    Set B: 출력.csv의 귀속 그룹 컬럼 합집합 (기본: 주관부서 ∪ 사용부서,
-           section2.groups 설정 시 해당 컬럼들).
+    Set B: 부서정보에 등록된 팀 집합. 섹션2 귀속이 사업비정보 '주관부서' +
+           코스트센터→부서정보 '팀' 롤업 기준으로 바뀌었으므로, 롤업에서 실제로
+           누락되는 케이스(= 부서정보에 없는 코스트센터)만 Set A−Set B로 남는다.
 
     load_all_csvs() 이전에 호출되므로, 함수 진입 시 _apply_config_overrides(config)를
     먼저 호출하여 config의 컬럼명 오버라이드(COLUMN_MAP)가 반영된 상태에서 검증한다.
@@ -211,8 +213,6 @@ def check_unregistered_teams(file_paths: dict, config: dict | None = None) -> li
     col_cc   = COLUMN_MAP["코스트센터"]
     col_code = COLUMN_MAP["cc_code"]
     col_team = COLUMN_MAP["팀"]
-    col_주관 = COLUMN_MAP["귀속_주관부서"]
-    col_사용 = COLUMN_MAP["귀속_사용부서"]
 
     # ── Set A: 사업비정보 코스트센터 → 부서정보 팀 매핑 ─────────────────────
     try:
@@ -248,19 +248,15 @@ def check_unregistered_teams(file_paths: dict, config: dict | None = None) -> li
     if not set_a:
         return []
 
-    # ── Set B: 출력.csv 등록 부서 합집합 ─────────────────────────────────────
-    try:
-        df_out = _read_csv(Path(file_paths["output"]))
-    except Exception:
-        return []
-
-    set_b: set[str] = set()
-    # section2 귀속 그룹 설정이 있으면 그 컬럼들을, 없으면 기본 주관/사용 쌍을 사용
-    # (_apply_config_overrides 가 위에서 DEPT_GROUP_COLS 를 갱신한 상태)
-    for col in (DEPT_GROUP_COLS or [col_주관, col_사용]):
-        if col in df_out.columns:
-            vals = df_out[col].dropna().astype(str).str.strip()
-            set_b.update(vals[~vals.isin({"", "nan", FALLBACK_TEXT})].tolist())
+    # ── Set B: 부서정보 등록 팀 집합 ─────────────────────────────────────────
+    # 섹션2 귀속이 이제 사업비정보 '주관부서' + 코스트센터→부서정보 '팀' 롤업 기준이므로,
+    # '등록' 여부는 출력.csv가 아니라 부서정보에 코스트센터가 매핑되어 있는지로 결정된다.
+    # 부서정보에 없는 코스트센터(Set A의 "(미매칭:cc)")만 롤업에서 실제로 누락되므로,
+    # 그것만 미등록 경고로 남긴다.
+    set_b: set[str] = {
+        t for t in team_lookup.values()
+        if t and t.lower() != "nan" and t != FALLBACK_TEXT
+    }
 
     return sorted(set_a - set_b)
 
