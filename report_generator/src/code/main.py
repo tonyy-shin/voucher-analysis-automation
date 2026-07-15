@@ -662,7 +662,7 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
     )
     sec2_frame, sec2_flush, sec2_render, sec2_add = _make_rows_editor(
         _lbl_inner, dlg, sec2_groups_state,
-        [("label", "라벨", 16), ("csv_column", "출력.csv 부서 컬럼", 14)],
+        [("label", "라벨", 16), ("csv_column", "집계 기준 컬럼", 14)],
         lambda: {"label": "", "csv_column": ""},
         section_name="귀속 그룹",
         guard_field="csv_column", required_columns=required_columns,
@@ -702,7 +702,8 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             r, "※ 계정정보.csv에 없는 컬럼은 빈 칸으로 출력됩니다.",
             sec1_frame, sec1_render, sec1_add, "+ 행 추가"),
         "2. 부점귀속 현황": lambda r: _mount_rows_editor(
-            r, "※ 출력.csv의 부서 목록 컬럼명. 위쪽 그룹이 우선 귀속됩니다.",
+            r, "※ 집계 기준 컬럼명 (주관부서=사업비정보 라인별, 팀=코스트센터→부서정보). "
+               "각 그룹은 해당 컬럼 기준 전체 롤업으로 집계됩니다.",
             sec2_frame, sec2_render, sec2_add, "+ 그룹 추가"),
         "3-1. 직접비 공통비 분류 결과": lambda r: _mount_rows_editor(
             r, "※ 계정정보.csv 직간접구분 값 부분일치. 위에서부터 먼저 일치한 분류로 "
@@ -1225,13 +1226,18 @@ def main() -> None:
         if c and c not in _acct_available
     ]
 
-    # 섹션2 귀속 그룹의 csv_column 중 출력.csv에 없는 컬럼
-    _out_available = set(sheets[_SHEET_OUTPUT].columns)
+    # 섹션2 귀속 그룹의 csv_column 중 집계 소스 어디에도 없는 컬럼
+    # (주관부서=사업비정보 / 팀=부서정보 / 그 밖=출력.csv — enrich 후 df_enriched 컬럼 기준)
+    _group_available = (
+        set(sheets[data_loader._SHEET_TRANSACTION].columns)
+        | set(sheets[data_loader._SHEET_CCM].columns)
+        | set(sheets[_SHEET_OUTPUT].columns)
+    )
     unknown_group = [
         c for c in dict.fromkeys(
             e.get("csv_column", "") for e in _cfg_entries("section2", "groups")
         )
-        if c and c not in _out_available
+        if c and c not in _group_available
     ]
 
     # 섹션3-1 키워드 중 계정정보.csv 직간접구분 값에 전혀 일치하지 않는 키워드
@@ -1291,7 +1297,7 @@ def main() -> None:
     if unknown_group:
         config_warnings.append((
             "미등록 부점귀속 그룹 컬럼 (섹션2)",
-            "출력.csv에 없는 컬럼 — 해당 그룹은 빈 표로 출력됩니다",
+            "사업비정보/부서정보/출력.csv 어디에도 없는 컬럼 — 해당 그룹은 빈 표로 출력됩니다",
             unknown_group,
         ))
     if unmatched_keywords:

@@ -32,6 +32,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         # 사업비정보.csv
         "원가요소":    "원가요소",
         "코스트센터":  "코스트센터",
+        "주관부서":    "주관부서",   # 라인별 주관부서 (섹션2 주관부서 귀속 롤업 소스)
         # 계정정보.csv
         "계정번호":    "계정번호",
         "계정명":      "계정명",
@@ -85,14 +86,15 @@ _DEFAULT_CONFIG: dict[str, Any] = {
                 {"label": "산출기준", "csv_column": "산출기준"},
             ],
         },
-        # 섹션2 귀속 그룹은 동적 리스트 — csv_column 은 출력.csv 의 부서 목록 컬럼명.
-        # 리스트 순서 = 귀속 우선순위 (여러 그룹에 속한 팀은 위쪽 그룹으로 귀속).
+        # 섹션2 귀속 그룹은 동적 리스트 — csv_column 은 집계 기준이 되는 df_enriched 컬럼명.
+        #   주관부서 = 사업비정보.csv 라인별 주관부서 / 팀 = 코스트센터→부서정보 매핑.
+        # 각 그룹은 해당 컬럼 기준 전체 롤업(총계 = 전체 대상금액)으로 계산된다.
         "section2": {
             "제목": "2. 부점귀속 현황",
             "귀속현황": "귀속현황",
             "groups": [
                 {"label": "주관부서 귀속",     "csv_column": "주관부서"},
-                {"label": "실제 사용부서 귀속", "csv_column": "사용부서"},
+                {"label": "실제 사용부서 귀속", "csv_column": "팀"},
             ],
             "부점명": "부점명",
             "대상금액": "대상금액(단위: 원)",
@@ -442,19 +444,27 @@ def _normalize_section2(loaded: dict) -> None:
     sec = dl.get("section2")
     if not isinstance(sec, dict):
         return
+    # 섹션2 집계 기준 컬럼: 주관부서 = 사업비정보 라인별 주관부서, 사용부서 = 코스트센터→팀.
+    old_사용 = _resolve_csv_col(loaded, "귀속_사용부서")   # 구버전 출력.csv 사용부서 컬럼명
+    team_col = _str_or(loaded.get("col_team"), _resolve_csv_col(loaded, "팀"))
     if "groups" in sec:
         _sanitize_entry_list(sec, "groups", ("label", "csv_column"))
+        # 구버전 마이그레이션: '사용부서' 귀속 기준이 출력.csv 사용부서(원가요소 단위)에서
+        # 코스트센터→부서정보 '팀' 롤업으로 바뀌었으므로 구 csv_column 을 팀 컬럼으로 이관.
+        for g in sec.get("groups", []):
+            if isinstance(g, dict) and g.get("csv_column") == old_사용:
+                g["csv_column"] = team_col
         sec.pop("주관부서귀속", None)
         sec.pop("실제사용부서귀속", None)
         return
     sec["groups"] = [
         {
             "label": _str_or(sec.get("주관부서귀속"), "주관부서 귀속"),
-            "csv_column": _resolve_csv_col(loaded, "귀속_주관부서"),
+            "csv_column": _resolve_csv_col(loaded, "주관부서"),
         },
         {
             "label": _str_or(sec.get("실제사용부서귀속"), "실제 사용부서 귀속"),
-            "csv_column": _resolve_csv_col(loaded, "귀속_사용부서"),
+            "csv_column": team_col,
         },
     ]
     sec.pop("주관부서귀속", None)
@@ -549,6 +559,7 @@ def _render_annotated_yaml(config: dict[str, Any]) -> str:
         "  # ── 사업비정보.csv ──────────────────────────────────────────────────────",
         f"  원가요소: {col('원가요소')}",
         f"  코스트센터: {col('코스트센터')}",
+        f"  주관부서: {col('주관부서')}   # 라인별 주관부서 (섹션2 주관부서 귀속 롤업 소스)",
         "",
         "  # ── 계정정보.csv ───────────────────────────────────────────────────────",
         f"  계정번호: {col('계정번호')}",

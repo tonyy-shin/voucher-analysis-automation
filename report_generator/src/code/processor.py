@@ -239,6 +239,7 @@ def enrich_data(
         COLUMN_MAP["범위"],             # 사용부서
         COLUMN_MAP["지급대상"],         # 비용 지급 범위
         COLUMN_MAP["산출기준"],         # 산출기준
+        COLUMN_MAP["주관부서"],         # 사업비정보 라인별 주관부서 (섹션2 주관부서 롤업 소스)
         COLUMN_MAP["귀속_주관부서"],    # 귀속_주관부서
         COLUMN_MAP["귀속_사용부서"],    # 귀속_사용부서
     ]
@@ -306,7 +307,7 @@ def calc_dept_attribution(
     그룹별 ['대상금액'].sum() 총계로 이어진다.
     """
     if not group_cols:
-        group_cols = [COLUMN_MAP["귀속_주관부서"], COLUMN_MAP["귀속_사용부서"]]
+        group_cols = [COLUMN_MAP["주관부서"], COL_TEAM]
     empty = pd.DataFrame(columns=["부서명", "대상금액", "구성비(%)"])
 
     def _finalize(rows: list) -> pd.DataFrame:
@@ -333,6 +334,14 @@ def calc_dept_attribution(
             grouped["대상금액"].div(total).mul(100).round(2) if total != 0 else 0.0
         )
         return grouped.sort_values("대상금액", ascending=False).reset_index(drop=True)
+
+    # -- 집계 컬럼이 모두 df_enriched 에 존재하면 각 컬럼 기준 전체 롤업 ------------------
+    # section2.groups 의 csv_column 이 df_enriched 컬럼(주관부서=사업비정보 라인,
+    # 팀=코스트센터→부서정보)일 때, 각 컬럼을 groupby 하여 전체 대상금액을 집계한다.
+    # 두 표(주관부서/사용부서) 모두 총계 = 전체 대상금액이 되는 이중 롤업이며,
+    # 인건비류(주관부서 100 = 발생팀 10 + 10 …)의 발생부서 분해를 그대로 표현한다.
+    if group_cols and all(col in df_enriched.columns for col in group_cols):
+        return [_build_from_groupby(col) for col in group_cols]
 
     # -- df_output 없음 -> groupby 폴백 -----------------------------------------------
     if df_output is None or df_output.empty or COL_TEAM not in df_enriched.columns:
@@ -443,16 +452,15 @@ def calc_nature_classification(
 
     [집계 우선순위]
     1차: df_output가 있고 df_enriched에 '팀' 컬럼이 있으면,
-         실제 원가발생 기준 '팀' 컬럼으로 groupby.
-         출력> 시트의 주관/사용부서 중 실제발생사업비 미입력 팀은 0원 행으로 추가.
+         실제 원가발생 기준 '팀' 컬럼으로 groupby (발생한 모든 팀을 표시).
     2차 폴백: df_output가 없거나 '팀' 컬럼이 없으면 기존 귀속_사용부서 기준 groupby.
 
     Args:
         df_enriched:           enrich_data()의 반환값
-        df_output: 현재 keyword에 해당하는 출력> 행 (귀속_주관부서, 귀속_사용부서 포함)
-        dept_cols: 출력.csv의 부서 목록 컬럼 (section2.groups 의 csv_column 값들;
-                   None/빈 리스트면 기존 주관/사용 쌍 사용) — 섹션2와 동일한 기준으로
-                   등록 부서를 필터링하기 위해 공유한다.
+        df_output: 현재 keyword에 해당하는 출력> 행
+        dept_cols: (현재 미사용) 섹션2 롤업이 코스트센터→부서정보 팀 기준으로 바뀌면서
+                   출력.csv 등록 기준의 팀 제외 필터가 제거되어, 이 인자는 더 이상
+                   집계에 영향을 주지 않는다. 호출부 시그니처 호환을 위해 유지.
 
     Returns:
         컬럼: ['귀속_사용부서', '계약체결비', '계약유지비', '손해조사비', '투자관리비',
@@ -470,31 +478,15 @@ def calc_nature_classification(
             and not df_output.empty
             and COL_TEAM in df_enriched.columns):
 
-        # 1. 실제 원가발생 팀 기준 집계
+        # 실제 원가발생 팀 기준 집계 — 발생한 모든 팀을 그대로 표시한다.
+        # (섹션2 귀속이 코스트센터→부서정보 팀 롤업으로 바뀌면서 출력.csv 등록
+        #  기준의 팀 제외 필터는 제거됨. 실제 발생 팀을 조용히 누락시키지 않는다.)
         grouped = (
             df_enriched
             .groupby(COL_TEAM, as_index=False)[existing_nature]
             .sum()
             .rename(columns={COL_TEAM: dept_col})
         )
-
-        # 2. 출력> 시트 등록 부서 전체 수집 (section2 그룹 컬럼과 동일 기준)
-        all_output_depts: set[str] = set()
-        for col in (dept_cols or [COLUMN_MAP["귀속_주관부서"], COLUMN_MAP["귀속_사용부서"]]):
-            if col in df_output.columns:
-                vals = (
-                    df_output[col]
-                    .dropna()
-                    .astype(str)
-                    .str.strip()
-                )
-                all_output_depts.update(
-                    vals[~vals.isin({"", FALLBACK_TEXT})].tolist()
-                )
-
-        # 등록되지 않은 팀 제거 — all_output_depts 비어 있으면(sentinel) 건너뜀
-        if all_output_depts:
-            grouped = grouped[grouped[dept_col].isin(all_output_depts)].reset_index(drop=True)
     else:
         # 폴백: 귀속_사용부서 기준 집계 (df_output 없거나 팀 컬럼 없을 때)
         if dept_col not in df_enriched.columns:
