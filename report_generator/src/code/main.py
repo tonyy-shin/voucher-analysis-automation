@@ -745,7 +745,7 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             tk.Label(
                 _lbl_inner,
                 text="※ CSV 컬럼명과 표시명에 동일하게 적용됩니다. "
-                     "사업비정보.csv에 없는 이름은 빈 칸으로 출력됩니다.",
+                     "사업비정보.csv에 없는 이름은 0으로 출력됩니다.",
                 font=("맑은 고딕", 8), anchor="w", fg="#c0392b",
                 wraplength=560, justify="left",
             ).grid(row=_r, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))

@@ -12,7 +12,7 @@ import pandas as pd
 
 # data_loader에 정의된 컬럼 상수를 재사용 (중복 정의 방지)
 from data_loader import (
-    NATURE_COLS, BASIS_TEXT_COLS,
+    NATURE_COLS,
     COLUMN_MAP,
     FALLBACK_TEXT, COL_SUBTOTAL, COL_TOTAL, COL_TEAM, COL_TOTAL_AMOUNT,
     _SHEET_TRANSACTION, _SHEET_CCM, _SHEET_ACCOUNT, _SHEET_OUTPUT,
@@ -37,9 +37,12 @@ def build_classification_basis(
     """
     섹션4 분류 근거 dict를 생성한다 — legacy 키 + custom 키를 단일 dict로 병합 반환.
 
-    legacy(직공통비/성격별분류) 행은 BASIS_TEXT_COLS 컬럼별 첫 non-empty 텍스트를
-    "{컬럼}_근거" 키로 매핑한다(pdf_exporter._tbl_basis가 참조). 단, basis_rows에
-    type이 "직공통비" 또는 "성격별분류"인 행이 하나라도 있을 때만 legacy 키를 생성한다.
+    legacy(직공통비/성격별분류) 행은 "직접비" + NATURE_COLS(현재 값) 컬럼별 첫
+    non-empty 텍스트를 "{컬럼}_근거" 키로 매핑한다(pdf_exporter._tbl_basis가 참조).
+    NATURE_COLS는 사용자가 3-2 편집기에서 변경 가능하므로 매 호출 시점의 값을 그대로
+    반영한다 — 정적 목록을 쓰면 카테고리 추가/변경 시 근거 텍스트가 조용히 누락된다.
+    단, basis_rows에 type이 "직공통비" 또는 "성격별분류"인 행이 하나라도 있을 때만
+    legacy 키를 생성한다.
 
     custom 행은 row["csv_column"]이 비어 있지 않고 df_output에 존재하면, 해당 컬럼
     전체의 첫 non-empty 값을 cb[csv_column] 키로 저장한다.
@@ -51,8 +54,10 @@ def build_classification_basis(
     Returns:
         {"직접비_근거": str, ...(legacy), <csv_column>: str, ...(custom)}
     """
-    _LEGACY_KEYS = ["직접비_근거", "간접비_근거", "공통비_근거", "계약체결비_근거",
-                    "계약유지비_근거", "손해조사비_근거", "투자관리비_근거"]
+    # NATURE_COLS는 data_loader._apply_config_overrides가 in-place로 갱신하는 라이브
+    # 리스트이므로, 정적 상수로 미리 굳히지 않고 매 호출마다 현재 값으로 계산한다.
+    _legacy_cols = ["직접비"] + list(NATURE_COLS)
+    _LEGACY_KEYS = [f"{c}_근거" for c in _legacy_cols]
     rows = basis_rows or []
     has_legacy = any(
         r.get("type") in ("직공통비", "성격별분류") for r in rows
@@ -67,7 +72,7 @@ def build_classification_basis(
         if empty_df:
             basis.update({k: "" for k in _LEGACY_KEYS})
         else:
-            for col in BASIS_TEXT_COLS:
+            for col in _legacy_cols:
                 basis[f"{col}_근거"] = _first_nonempty(df_output, col)
 
     # custom 키 — csv_column 으로 지정한 컬럼의 첫 non-empty 값
