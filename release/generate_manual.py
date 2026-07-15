@@ -1,6 +1,6 @@
 """
 generate_manual.py
-역할: 지급사업비 분석 자동화 프로그램 사용설명서(v2.2.0) PDF를 생성한다.
+역할: 지급사업비 분석 자동화 프로그램 사용설명서(v2.5.0) PDF를 생성한다.
 
 기존 pdf_exporter.py의 PDF 생성 패턴(ReportLab Platypus, A4 세로, NanumGothic TTF 등록,
 상/하단 색상 바)을 재사용하되, EY Korea 브랜드 색상과 20mm 여백을 적용한다.
@@ -9,7 +9,7 @@ generate_manual.py
       /usr/share/fonts/truetype/nanum. 모두 실패 시 Helvetica 폴백(한글 깨짐 경고).
 
 실행:  python3 generate_manual.py
-출력:  release/사용설명서_v2.2.0.pdf
+출력:  release/사용설명서_v2.5.0.pdf
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ from PIL import Image as PILImage
 
 # ── 출력 경로 ─────────────────────────────────────────────────────────────────
 _HERE = Path(__file__).resolve().parent
-_OUT_PDF = _HERE / "사용설명서_v2.2.0.pdf"
+_OUT_PDF = _HERE / "사용설명서_v2.5.0.pdf"
 _SHOTS = _HERE / "screenshots"          # capture_screenshots.py 출력 폴더
 
 # ── EY Korea 브랜드 색상 ──────────────────────────────────────────────────────
@@ -279,7 +279,7 @@ def warn_box(title: str, body: str, s: dict) -> Table:
 #  페이지 데코레이션 (상/하단 바 — pdf_exporter 헤더/푸터 바 패턴)
 # ════════════════════════════════════════════════════════════════════════════
 
-_FOOTER_LEFT = "지급사업비 분석 자동화 프로그램 사용설명서 v2.2.0"
+_FOOTER_LEFT = "지급사업비 분석 자동화 프로그램 사용설명서 v2.5.0"
 _FOOTER_RIGHT = "© EY Korea"
 
 
@@ -332,8 +332,8 @@ def build_story(s: dict) -> list:
     story.append(Paragraph("Business Expense Statement Analysis — User Manual", s["cover_sub"]))
     story.append(gap(28))
     cover_meta = [
-        [Paragraph("버전", s["td_b"]), Paragraph("v2.2.0", s["td"])],
-        [Paragraph("배포일", s["td_b"]), Paragraph("2026년 06월", s["td"])],
+        [Paragraph("버전", s["td_b"]), Paragraph("v2.5.0", s["td"])],
+        [Paragraph("배포일", s["td_b"]), Paragraph("2026년 07월", s["td"])],
         [Paragraph("운영 체제", s["td_b"]), Paragraph("Windows 전용", s["td"])],
         [Paragraph("입력 형식", s["td_b"]), Paragraph("CSV 4개 파일 (UTF-8 / CP949)", s["td"])],
         [Paragraph("출력 형식", s["td_b"]), Paragraph("PDF (A4 세로)", s["td"])],
@@ -365,11 +365,14 @@ def build_story(s: dict) -> list:
     story.extend(bullets([
         "<b>출력전표 코드별 일괄 처리</b> — 출력.csv에 등록된 코드마다 PDF 1개를 생성합니다.",
         "<b>3중 LEFT JOIN</b> — 사업비정보 ↔ 부서정보(코스트센터) ↔ 계정정보(원가요소) ↔ 출력(출력전표).",
-        "<b>부점귀속 현황</b> — 출력.csv의 주관부서·사용부서 기준으로 금액을 귀속 분류합니다.",
+        "<b>부점귀속 현황(섹션2)</b> — 사업비정보의 <b>주관부서</b>(라인별)와 코스트센터→부서정보 <b>팀</b>을 기준으로 "
+        "금액을 각각 전체 롤업하여 '주관부서 귀속 / 실제 사용부서 귀속' 두 표로 보여줍니다(자세한 내용은 4장 참고).",
         "<b>직접비/공통비 분류</b> — 부서정보.csv의 직간접구분('직접'/'공통') 기준으로 집계합니다.",
         "<b>성격별 분류(6종)</b> — 계약체결비·계약유지비·손해조사비·투자관리비·간접비·공통비를 부점별로 교차 집계합니다.",
         "<b>색상·로고 설정</b> — 포인트 색상 및 로고(최대 3슬롯, 슬롯별 높이 조절·실시간 미리보기).",
         "<b>문구 설정 탭</b> — 테마 대화상자의 [문구 설정] 탭에서 PDF에 인쇄되는 모든 표시 문구(제목·라벨·헤더)를 직접 편집할 수 있습니다.",
+        "<b>행·열 추가/삭제(전 섹션)</b> — [문구 설정] 탭에서 계정 테이블·대상정의·부점귀속·분류 근거 등 각 섹션의 "
+        "행과 열을 자유롭게 추가·삭제할 수 있으며, JOIN 키 등 <b>필수 행은 삭제가 잠겨</b> 실수로 지워지지 않습니다.",
         "<b>성격 컬럼 추가/삭제</b> — [문구 설정] 탭에서 성격 분류 컬럼을 추가·삭제하며, 입력한 이름이 CSV 컬럼명과 PDF 표시명에 동시에 적용됩니다.",
         "<b>미등록 부서 사전 감지</b> — 출력.csv에 없는 부서를 처리 전에 경고합니다.",
         "<b>미등록 성격 컬럼 경고</b> — 설정한 성격 컬럼이 사업비정보.csv에 없으면 최종 요약 창에 경고로 표시됩니다.",
@@ -408,7 +411,8 @@ def build_story(s: dict) -> list:
     req_rows = [
         [Paragraph("사업비정보.csv", s["td_b"]),
          Paragraph("원가요소, 코스트센터", s["td"]),
-         Paragraph("계약체결비·계약유지비·손해조사비·투자관리비·간접비·공통비·합계", s["td"])],
+         Paragraph("계약체결비·계약유지비·손해조사비·투자관리비·간접비·공통비·합계, "
+                   "<b>주관부서</b>(라인별, 코스트센터당 1개 · 섹션2 부점귀속 롤업용)", s["td"])],
         [Paragraph("계정정보.csv", s["td_b"]),
          Paragraph("계정번호", s["td"]),
          Paragraph("계정명·계정그룹ID·계정그룹명·대상정의·사용 부서·비용 지급 범위·산출기준", s["td"])],
@@ -457,8 +461,8 @@ def build_story(s: dict) -> list:
          Paragraph("<b>필수 컬럼 검증</b> — 4개 파일의 필수 컬럼을 확인합니다. 누락 시 어떤 "
                    "파일의 어떤 컬럼이 없는지 오류 메시지로 안내하고 중단됩니다.", s["td"])],
         [Paragraph("Step 4", s["td_b"]),
-         Paragraph("<b>미등록 부서 감지</b> — 사업비정보의 코스트센터로 매핑되는 팀이 출력.csv의 "
-                   "주관/사용부서에 없으면 경고합니다. [무시하고 진행] 또는 [종료 후 수정]을 선택합니다.", s["td"])],
+         Paragraph("<b>미등록 부서 감지</b> — 사업비정보의 코스트센터가 <b>부서정보.csv</b>에 팀으로 매핑되지 "
+                   "않으면(=미매칭 코스트센터) 경고합니다. [무시하고 진행] 또는 [종료 후 수정]을 선택합니다.", s["td"])],
         [Paragraph("Step 5", s["td_b"]),
          Paragraph("<b>저장 폴더 선택</b> — 생성된 PDF를 저장할 폴더를 지정합니다.", s["td"])],
         [Paragraph("Step 6", s["td_b"]),
@@ -468,8 +472,8 @@ def build_story(s: dict) -> list:
     story.append(info_table(step_rows, s, [20 * mm, _WIDTH - 20 * mm], header=None))
     story.append(gap(4))
     story.append(Paragraph(
-        "※ 참고: 미등록 부서를 무시하고 진행하면 해당 부서의 실적은 부점귀속·성격별 집계에서 "
-        "제외됩니다. 정확한 결과가 필요하면 출력.csv에 부서를 추가한 뒤 재실행하십시오.", s["note"]))
+        "※ 참고: 부서정보에 매핑되지 않은 코스트센터는 팀을 알 수 없어 부점귀속·성격별 집계에서 제외됩니다. "
+        "정확한 결과가 필요하면 부서정보.csv에 해당 코스트센터→팀 매핑을 추가한 뒤 재실행하십시오.", s["note"]))
 
     story.append(gap(10))
 
@@ -566,7 +570,8 @@ def build_story(s: dict) -> list:
         [Paragraph("1. 대상정의", s["td_b"]),
          Paragraph("대상정의·범위(사용 부서)·지급대상(비용 지급 범위)·산출기준", s["td"])],
         [Paragraph("2. 부점귀속", s["td_b"]),
-         Paragraph("주관부서 귀속 / 실제 사용부서 귀속을 나란히 표시(대상금액·구성비)", s["td"])],
+         Paragraph("주관부서 귀속 / 실제 사용부서 귀속을 나란히 표시(대상금액·구성비). "
+                   "두 표 모두 전체 금액을 100% 롤업하므로 총계가 동일합니다(아래 상세 참고).", s["td"])],
         [Paragraph("3-1. 직접·공통비", s["td_b"]),
          Paragraph("부서정보 직간접구분 기준 직접비·공통비 분류 금액", s["td"])],
         [Paragraph("3-2. 성격별", s["td_b"]),
@@ -579,6 +584,47 @@ def build_story(s: dict) -> list:
                    "(컬럼이 없거나 비어 있으면 빈 칸). 자세한 설정은 3장의 '분류 근거(섹션 4) 행 설정' 참고.", s["td"])],
     ]
     story.append(info_table(pdf_rows, s, [32 * mm, _WIDTH - 32 * mm], header=None))
+
+    story.append(gap(10))
+
+    # ── 4-1. 부점귀속 현황(섹션2) 집계 방식 ───────────────────────────────
+    story.append(subhead("부점귀속 현황(섹션2) 집계 방식", s))
+    story.append(gap(4))
+    story.append(body(
+        "사업비정보.csv에 <b>코스트센터 바로 옆에 '주관부서' 컬럼</b>을 추가하면, 섹션2가 아래 두 관점으로 "
+        "금액을 집계합니다. 주관부서는 <b>전표를 신청·발의한(예산 통제) 조직</b>이며, 실제 사용부서는 "
+        "<b>비용이 실제로 발생한 부서</b>입니다. 두 표는 모두 <b>동일한 전체 금액을 100% 롤업</b>하여 "
+        "보여주므로 각 표의 총계가 서로 같습니다.", s))
+    story.append(gap(4))
+    story.extend(bullets([
+        "<b>주관부서 귀속 표</b> — 사업비정보 라인별 <b>주관부서</b>별로 대상금액을 합산합니다.",
+        "<b>실제 사용부서 귀속 표</b> — 코스트센터를 부서정보의 <b>팀</b>으로 매핑하여 팀별로 합산합니다.",
+        "<b>주관부서 컬럼 규칙</b> — 라인별로 입력하되, <b>하나의 코스트센터에는 하나의 주관부서만</b> 고정합니다.",
+    ], s))
+    story.append(gap(4))
+    story.append(body(
+        "<b>예시(인건비).</b> 인사팀이 전 부서 급여 전표를 대표로 신청(주관)하지만, 실제 비용은 부서별로 "
+        "귀속됩니다. 인사팀이 신청한 100원이 언더라이팅 10 · 총무 10 · … 처럼 실제 발생부서로 나뉜다면, "
+        "섹션2는 아래와 같이 <b>같은 100원을 두 관점</b>으로 각각 보여줍니다.", s))
+    story.append(gap(3))
+    ex_rows = [
+        [Paragraph("주관부서 귀속", s["td_b"]),
+         Paragraph("인사팀 100원 (전액 인사팀 주관)", s["td"])],
+        [Paragraph("실제 사용부서 귀속", s["td_b"]),
+         Paragraph("언더라이팅 10원 · 총무 10원 · … (합계 100원)", s["td"])],
+    ]
+    story.append(info_table(ex_rows, s, [34 * mm, _WIDTH - 34 * mm],
+                            header=["관점", "표에 표시되는 값(예)"]))
+    story.append(gap(5))
+    story.append(warn_box(
+        "주관부서 컬럼이 없어도 됩니다 (하위 호환)",
+        "'주관부서' 컬럼이 없는 <b>기존 사업비정보.csv도 그대로 동작</b>합니다. 이 경우 주관부서 귀속 표는 "
+        "비어 있거나 종전 방식으로 처리되며, 실제 사용부서(팀) 귀속 표는 정상 출력됩니다. 부서별 롤업 표시가 "
+        "필요할 때만 코스트센터 옆에 주관부서 컬럼을 채워 주세요.", s))
+    story.append(gap(4))
+    story.append(Paragraph(
+        "※ 참고(섹션3 성격별×부점 교차표): 실제 발생액이 있는 팀은 모두 표시됩니다. 이전에는 출력.csv에 "
+        "등록되지 않은 팀이 제외되었으나, 이제는 부서정보에 매핑된 팀이면 성격별 표에도 함께 나타납니다.", s["note"]))
 
     story.append(gap(10))
 
@@ -613,9 +659,9 @@ def build_story(s: dict) -> list:
          "확인하고, templates/ 양식과 컬럼명을 대조하십시오. 파일이 Excel 등에서 열려 있으면 닫은 뒤 다시 "
          "시도하십시오. 인코딩이 깨졌다면 UTF-8(BOM) 또는 CP949로 저장하십시오."),
         ("Q2. 미등록 부서 경고가 떠요",
-         "사업비정보의 코스트센터로 매핑되는 팀이 출력.csv의 주관부서/사용부서에 없을 때 발생합니다. "
-         "정확한 집계를 위해서는 [종료 후 수정]을 누르고 출력.csv에 해당 부서를 추가한 뒤 재실행하십시오. "
-         "코스트센터 자체가 부서정보에 없으면 \"(미매칭:코드)\"로 표시되니 부서정보.csv도 확인하십시오."),
+         "사업비정보의 코스트센터가 부서정보.csv에 팀으로 매핑되어 있지 않을 때 발생합니다. 매핑되지 않은 "
+         "코스트센터는 \"(미매칭:코드)\"로 표시되며 집계에서 제외됩니다. 정확한 집계를 위해서는 [종료 후 수정]을 "
+         "누르고 부서정보.csv에 해당 코스트센터→팀 매핑을 추가한 뒤 재실행하십시오."),
         ("Q3. PDF가 생성되지 않아요",
          "① 출력.csv의 출력전표 코드가 사업비정보의 원가요소에 존재하는지, ② 저장 폴더에 쓰기 권한이 "
          "있는지, ③ 동일 파일이 열려 있지 않은지 확인하십시오. 일부 코드만 실패한 경우 요약 창에 코드별 "
@@ -625,8 +671,8 @@ def build_story(s: dict) -> list:
          "확인하십시오. 개발 환경에서는 FONT_PATH 환경변수로 폰트 경로를 지정할 수 있습니다."),
         ("Q5. 성격별 금액이 0으로 나와요",
          "① 사업비정보.csv의 성격 컬럼(계약체결비·계약유지비·손해조사비·투자관리비·간접비·공통비) 값이 "
-         "비어 있거나, ② 직간접구분이 '직접'/'공통'이 아니어서 분류에서 빠졌거나, ③ 해당 부서가 "
-         "출력.csv에 등록되지 않아 집계에서 제외된 경우입니다. 세 가지를 순서대로 점검하십시오."),
+         "비어 있거나, ② 직간접구분이 '직접'/'공통'이 아니어서 분류에서 빠졌거나, ③ 해당 코스트센터가 "
+         "부서정보.csv에 매핑되지 않아 집계에서 제외된 경우입니다. 세 가지를 순서대로 점검하십시오."),
     ]
     for q, a in faqs:
         story.append(Paragraph(q, s["faq_q"]))
@@ -639,6 +685,12 @@ def build_story(s: dict) -> list:
     story.append(section_title("7", "변경 이력", s))
     story.append(gap(4))
     hist_rows = [
+        [Paragraph("v2.5.0", s["td_b"]), Paragraph("2026/07", s["td_c"]),
+         Paragraph("<b>부점귀속 현황(섹션2) 개편</b> — 사업비정보 라인별 '주관부서' 컬럼을 기준으로 "
+                   "주관부서 귀속/실제 사용부서(팀) 귀속을 각각 <b>전체 롤업</b>으로 집계(두 표 총계 동일); "
+                   "'주관부서' 컬럼이 없으면 종전 방식으로 하위 호환; 섹션3 성격별 표에 실제 발생 팀을 모두 표시. "
+                   "이와 함께 <b>전 섹션 행·열 추가/삭제 일반화</b>, <b>필수 행 삭제 잠금</b>, "
+                   "<b>3-1 직접·공통비 분류 기준 수정</b>(계정과목 코드 기준) 및 <b>미매핑 계정 경고</b> 추가.", s["td"])],
         [Paragraph("v2.2.0", s["td_b"]), Paragraph("2026/06", s["td_c"]),
          Paragraph("<b>분류 근거(섹션 4) 동적 행 편집</b> 추가(직공통비·성격별분류·custom 타입 행 "
                    "추가/삭제); <b>참조 셀 데이터 연동</b> — 행마다 지정한 출력.csv '참조문서 컬럼' "
@@ -660,7 +712,7 @@ def build_story(s: dict) -> list:
         header=["버전", "날짜", "주요 변경 내용"]))
     story.append(gap(8))
     story.append(Paragraph(
-        "본 설명서는 v2.2.0(현재 코드) 기준으로 작성되었습니다. © EY Korea", s["note"]))
+        "본 설명서는 v2.5.0(현재 코드) 기준으로 작성되었습니다. © EY Korea", s["note"]))
 
     return story
 
@@ -677,7 +729,7 @@ def main() -> None:
         str(_OUT_PDF), pagesize=_PAGE,
         leftMargin=_MARGIN, rightMargin=_MARGIN,
         topMargin=_MARGIN + 4 * mm, bottomMargin=_MARGIN,
-        title="지급사업비 분석 자동화 프로그램 사용설명서 v2.2.0",
+        title="지급사업비 분석 자동화 프로그램 사용설명서 v2.5.0",
         author="EY Korea",
     )
     frame = Frame(_MARGIN, _MARGIN, _WIDTH, _PAGE[1] - 2 * _MARGIN - 4 * mm,
