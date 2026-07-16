@@ -619,6 +619,45 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
         )
         _render_basis_rows()
 
+    # ── 섹션4 동적 항목 편집 상태 — 감지할 출력.csv 컬럼명 리스트 (nature 편집기 패턴) ──
+    dynamic_vars: list[tk.StringVar] = [
+        tk.StringVar(value=str(x))
+        for x in config["display_labels"]["section4"].get("동적_컬럼_목록", [])
+    ]
+    dynamic_frame = tk.Frame(_lbl_inner)   # section4 블록 내부에 grid 됨
+    dynamic_add_var = tk.StringVar()
+
+    def _render_dynamic_rows():
+        for w in dynamic_frame.winfo_children():
+            w.destroy()
+        for idx, var in enumerate(dynamic_vars):
+            tk.Label(dynamic_frame, text=f"동적 {idx + 1}:", width=8, anchor="e").grid(
+                row=idx, column=0, padx=(8, 4), pady=2, sticky="e"
+            )
+            tk.Entry(dynamic_frame, textvariable=var, width=30).grid(
+                row=idx, column=1, padx=(0, 4), pady=2, sticky="ew"
+            )
+            tk.Button(
+                dynamic_frame, text="삭제", width=5,
+                command=(lambda i=idx: _delete_dynamic(i)),
+            ).grid(row=idx, column=2, padx=(0, 8), pady=2)
+
+    def _delete_dynamic(idx: int):
+        del dynamic_vars[idx]
+        _render_dynamic_rows()
+
+    def _add_dynamic():
+        name = dynamic_add_var.get().strip()
+        if not name:
+            messagebox.showwarning("입력 필요", "추가할 동적 컬럼 이름을 입력하세요.", parent=dlg)
+            return
+        if name in [v.get().strip() for v in dynamic_vars]:
+            messagebox.showwarning("중복", f"'{name}' 은(는) 이미 존재합니다.", parent=dlg)
+            return
+        dynamic_vars.append(tk.StringVar(value=name))
+        dynamic_add_var.set("")
+        _render_dynamic_rows()
+
     # ── 계정 테이블/섹션1/섹션2/섹션3-1 동적 행 편집기 (_make_rows_editor 공용) ──
     acct_cols_state: list[dict] = copy.deepcopy(_dl["account_table"].get("columns", []))
     sec1_rows_state: list[dict] = copy.deepcopy(_dl["section1"].get("rows", []))
@@ -750,17 +789,18 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             tk.Entry(add_row, textvariable=add_var, width=40).pack(side="left", padx=(0, 4))
             tk.Button(add_row, text="+ 추가", width=6, command=_add_nature).pack(side="left")
 
-    # ── 4. 분류 근거 동적 행 편집기 (정적 _label_groups 대신) ────────────────
+    # ── 4. 분류 근거 편집기 (고정 항목 + 동적 항목, 정적 _label_groups 대신) ──────
     tk.Label(
-        _lbl_inner, text="4. 분류 근거", font=("맑은 고딕", 10, "bold"),
+        _lbl_inner, text="4. 분류 근거 — 고정 항목", font=("맑은 고딕", 10, "bold"),
         anchor="w", fg="#2E2E38",
     ).grid(row=_r, column=0, columnspan=2, sticky="w", padx=8, pady=(10, 2))
     _r += 1
     tk.Label(
         _lbl_inner,
-        text="※ 각 행은 출력.csv의 근거 컬럼 하나를 지정합니다. 해당 전표 코드의 행들에서 "
-             "그 컬럼의 빈칸이 아닌 셀을 순서대로 모아 표시합니다(셀 내용이 곧 근거 문구). "
-             "근거 컬럼은 목록에서 고르거나 직접 입력할 수 있습니다. 행을 삭제하면 PDF에서도 제외됩니다.",
+        text="※ [고정 항목] 각 행은 출력.csv의 근거 컬럼 하나를 지정합니다. 출력전표와 무관하게 "
+             "파일 전체에서 그 컬럼의 빈칸 아닌 셀을 순서대로 모아 표시하므로 모든 보고서에 동일하게 "
+             "나옵니다(셀 내용이 곧 근거 문구). 참조 컬럼은 조회 중인 출력전표 행 기준입니다. "
+             "근거 컬럼은 목록에서 고르거나 직접 입력할 수 있습니다.",
         font=("맑은 고딕", 8), anchor="w", fg="#c0392b",
         wraplength=560, justify="left",
     ).grid(row=_r, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
@@ -771,8 +811,33 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
     basis_add_row = tk.Frame(_lbl_inner)
     basis_add_row.grid(row=_r, column=0, columnspan=2, sticky="w", padx=8, pady=(2, 8))
     _r += 1
-    tk.Button(basis_add_row, text="+ 행 추가",
+    tk.Button(basis_add_row, text="+ 고정 항목 행 추가",
               command=_add_basis_row).pack(side="left")
+
+    # ── 4. 분류 근거 — 동적 항목(감지할 컬럼명) ──────────────────────────────
+    tk.Label(
+        _lbl_inner, text="4. 분류 근거 — 동적 항목", font=("맑은 고딕", 10, "bold"),
+        anchor="w", fg="#2E2E38",
+    ).grid(row=_r, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 2))
+    _r += 1
+    tk.Label(
+        _lbl_inner,
+        text="※ [동적 항목] 감지할 출력.csv 컬럼명만 등록합니다. 조회 중인 출력전표 행에 값이 "
+             "있을 때만 그 보고서에 '컬럼명'을 라벨로 하는 새 항목이 생성되고, 값이 없으면 "
+             "그 보고서에는 항목 자체가 나타나지 않습니다.",
+        font=("맑은 고딕", 8), anchor="w", fg="#c0392b",
+        wraplength=560, justify="left",
+    ).grid(row=_r, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
+    _r += 1
+    dynamic_frame.grid(row=_r, column=0, columnspan=2, sticky="w")
+    _r += 1
+    _render_dynamic_rows()
+    dynamic_add_row = tk.Frame(_lbl_inner)
+    dynamic_add_row.grid(row=_r, column=0, columnspan=2, sticky="w", padx=8, pady=(2, 8))
+    _r += 1
+    tk.Entry(dynamic_add_row, textvariable=dynamic_add_var, width=24).pack(side="left", padx=(0, 4))
+    tk.Button(dynamic_add_row, text="+ 동적 컬럼 추가",
+              command=_add_dynamic).pack(side="left")
 
     def _dl_set(path: tuple, value: str) -> None:
         cur = config["display_labels"]
@@ -902,8 +967,11 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
         # 성격 컬럼: nature_cols(CSV명) = display명 통합 리스트로 양쪽에 동일 반영
         config["nature_cols"] = new_nature
         config["display_labels"]["section3_2"]["nature_cols"] = list(new_nature)
-        # 섹션4 분류 근거 행 설정 반영
+        # 섹션4 분류 근거 — 고정 항목(rows) + 동적 항목(동적_컬럼_목록) 반영
         config["display_labels"]["section4"]["rows"] = basis_rows_state
+        config["display_labels"]["section4"]["동적_컬럼_목록"] = [
+            v.get().strip() for v in dynamic_vars if v.get().strip()
+        ]
         # 계정 테이블/섹션1/2/3-1 동적 리스트 반영
         config["display_labels"]["account_table"]["columns"] = acct_cols_state
         config["display_labels"]["section1"]["rows"] = sec1_rows_state

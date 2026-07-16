@@ -587,25 +587,37 @@ def _tbl_nature_32(nat: pd.DataFrame, s: dict, fb: str) -> list:
 # ── [H] 4. 분류 근거 ───────────────────────────────────────────────────────────
 
 def _tbl_basis(cb: dict, s: dict) -> list:
-    # 단일 경로 행 렌더러 — config display_labels.section4.rows 기준.
-    # 모든 행은 label / csv_column / 참조_csv_column 만 가진다. content 는
-    # build_classification_basis 가 keyword로 수집한 cb[csv_column] (셀 리스트)를
-    # <br/><br/>로 결합한 값이다. 행이 삭제되면 PDF에서도 제외된다.
+    # 고정 항목 + 동적 항목 렌더러.
+    #   고정 항목(config rows): 항상 행 생성. content = 파일 전체 수집 셀 결합,
+    #     참조 = 해당 keyword 스코프 값. (build_classification_basis 참조)
+    #   동적 항목(cb["dynamic"]): 값이 있는 컬럼만 label=컬럼명으로 행 생성(참조 없음).
     L = s['labels']['section4']
     rows_cfg = L.get('rows', [])
+    content_map = cb.get('content', {})
+    refs        = cb.get('refs', {})
+    dynamic     = cb.get('dynamic', [])
 
     data = []
+    # 고정 항목 — 값이 비어도 라벨 행은 항상 표시
     for row_cfg in rows_cfg:
         label    = row_cfg.get('label', '')
         csv_col  = row_cfg.get('csv_column', '')
         ref_col   = row_cfg.get('참조_csv_column', '')
-        content  = '<br/><br/>'.join(cb.get(csv_col, []))
-        참조_text = cb.get('참조__' + ref_col, '') if ref_col else ''
+        content  = '<br/><br/>'.join(content_map.get(csv_col, []))
+        참조_text = refs.get(ref_col, '') if ref_col else ''
 
         data.append([
             _P(label,     s['bold']),
             _P(content,   s['body']),
             _P(참조_text, s['center']),
+        ])
+
+    # 동적 항목 — 값이 있는 컬럼만 새 행으로 추가 (라벨=컬럼명, 참조 없음)
+    for col, cells in dynamic:
+        data.append([
+            _P(col,                         s['bold']),
+            _P('<br/><br/>'.join(cells),    s['body']),
+            _P('',                          s['center']),
         ])
 
     if not data:

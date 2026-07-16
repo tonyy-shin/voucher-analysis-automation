@@ -33,34 +33,38 @@ def _first_nonempty(df_output: pd.DataFrame, col: str) -> str:
 def build_classification_basis(
     df_output: pd.DataFrame | None,
     basis_rows: list[dict],
+    dynamic_cols: list[str],
     keyword: str,
 ) -> dict[str, object]:
     """
-    섹션4 분류 근거 dict를 생성한다 — 모든 행 동일한 단일 메커니즘.
+    섹션4 분류 근거 dict를 생성한다 — 고정 항목 / 동적 항목 두 갈래.
 
-    각 행은 소스 컬럼(csv_column) 하나를 지정한다. 현재 keyword(출력전표)로 출력.csv를
-    필터링한 뒤, 필터된 행을 원래 순서대로 순회하며 그 컬럼의 non-empty 셀을 전부 수집해
-    리스트로 저장한다(pdf_exporter._tbl_basis가 <br/><br/>로 결합). 셀 값은 이미
-    "라벨: 내용" 완성형이므로 코드는 라벨을 조합하지 않으며, 빈 셀은 건너뛴다.
+    고정 항목(basis_rows: label/csv_column/참조_csv_column)은 keyword와 무관하게
+    출력.csv **전체**에서 csv_column의 non-empty 셀을 원래 행 순서로 수집한다. 어떤
+    출력전표를 조회하든 내용이 동일하다. 셀 값은 이미 "라벨: 내용" 완성형이므로 코드는
+    라벨을 조합하지 않으며, 빈 셀은 건너뛴다. 참조(참조_csv_column)만은 keyword로 필터한
+    sub 기준 첫 non-empty 값을 쓴다(콘텐츠는 파일 전체, 참조는 keyword 스코프).
 
-    참조(참조_csv_column) 값도 동일하게 keyword로 필터한 뒤 첫 non-empty 값을 쓴다.
-    content 키(csv_column)와 충돌하지 않도록 "참조__" 접두사를 붙인다.
+    동적 항목(dynamic_cols: 컬럼명 리스트)은 keyword로 필터한 sub에서만 해당 컬럼의
+    non-empty 셀을 수집한다. 값이 하나라도 있으면 (컬럼명, [셀]) 로 추가하고, 없으면
+    아무것도 추가하지 않는다(그 보고서에는 항목 자체가 없음). 각 컬럼 독립 판단.
 
     Args:
-        df_output:  출력.csv 전체 DataFrame (없거나 비어 있으면 빈 dict 반환)
-        basis_rows: config display_labels.section4.rows (label/csv_column/참조_csv_column)
-        keyword:    현재 출력전표 코드 — 이 코드에 해당하는 출력.csv 행만 대상으로 한다
+        df_output:    출력.csv 전체 DataFrame (없거나 비어 있으면 빈 구조 반환)
+        basis_rows:   고정 항목 설정 (label/csv_column/참조_csv_column)
+        dynamic_cols: 동적 항목으로 감지할 출력.csv 컬럼명 리스트
+        keyword:      현재 출력전표 코드 (동적 항목/참조의 필터 기준)
 
     Returns:
-        {<csv_column>: list[str] (수집된 셀), "참조__<ref>": str, ...}
+        {"content": {csv_column: [셀,...]}, "refs": {ref_col: str},
+         "dynamic": [(컬럼명, [셀,...]), ...]}
     """
-    rows = basis_rows or []
-    basis: dict[str, object] = {}
+    basis: dict[str, object] = {"content": {}, "refs": {}, "dynamic": []}
 
     if df_output is None or df_output.empty:
         return basis
 
-    # keyword(출력전표)로 출력.csv 행을 필터 — 코드당 여러 행을 원래 순서대로 유지한다.
+    # keyword(출력전표)로 필터한 sub — 동적 항목/참조 전용. 고정 콘텐츠는 df_output 전체 사용.
     out_col = COLUMN_MAP["출력전표"]
     kw = str(keyword or "").strip()
     if out_col in df_output.columns and kw:
@@ -68,18 +72,26 @@ def build_classification_basis(
     else:
         sub = df_output
 
-    for r in rows:
-        # content — 소스 컬럼의 non-empty 셀을 순서대로 수집 (빈 셀 skip)
-        csv_col = r.get("csv_column", "")
-        if csv_col and csv_col in sub.columns:
-            cells = sub[csv_col].dropna().astype(str).str.strip()
-            cells = cells[~cells.isin(["", "nan", "none", "None"])]
-            basis[csv_col] = cells.tolist()
+    def _collect(df: pd.DataFrame, col: str) -> list[str]:
+        """df[col]의 non-empty 셀을 원래 순서대로 리스트로 수집."""
+        s = df[col].dropna().astype(str).str.strip()
+        return s[~s.isin(["", "nan", "none", "None"])].tolist()
 
-        # 참조 — keyword 필터 후 첫 non-empty 값
+    # 고정 항목 — 콘텐츠는 파일 전체, 참조는 keyword sub 기준
+    for r in basis_rows or []:
+        csv_col = r.get("csv_column", "")
+        if csv_col and csv_col in df_output.columns:
+            basis["content"][csv_col] = _collect(df_output, csv_col)
         ref_col = r.get("참조_csv_column", "")
         if ref_col and ref_col in sub.columns:
-            basis["참조__" + ref_col] = _first_nonempty(sub, ref_col)
+            basis["refs"][ref_col] = _first_nonempty(sub, ref_col)
+
+    # 동적 항목 — keyword sub에서 값이 있는 컬럼만 (컬럼명, [셀]) 로 추가
+    for col in dynamic_cols or []:
+        if col and col in sub.columns:
+            cells = _collect(sub, col)
+            if cells:
+                basis["dynamic"].append((col, cells))
 
     return basis
 
@@ -635,8 +647,10 @@ def run_pipeline(
         if e.get("csv_column")
     ))
 
-    # ── 분류 근거: 섹션4 행 설정 기준, 이 keyword의 출력.csv 행에서 근거 텍스트 수집 ──
-    classification_basis = build_classification_basis(df_output, basis_rows, keyword)
+    # ── 분류 근거: 고정 항목(파일 전체) + 동적 항목(이 keyword 종속) ──
+    sec4 = labels.get("section4", {}) if isinstance(labels, dict) else {}
+    dynamic_cols = [c for c in sec4.get("동적_컬럼_목록", []) if isinstance(c, str) and c.strip()]
+    classification_basis = build_classification_basis(df_output, basis_rows, dynamic_cols, keyword)
 
     # Step 1 — 필터링
     df_filtered = filter_by_keyword(df_actual, keyword)
