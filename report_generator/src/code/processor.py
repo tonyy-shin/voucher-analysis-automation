@@ -56,9 +56,16 @@ def build_classification_basis(
     """
     # NATURE_COLS는 data_loader._apply_config_overrides가 in-place로 갱신하는 라이브
     # 리스트이므로, 정적 상수로 미리 굳히지 않고 매 호출마다 현재 값으로 계산한다.
-    _legacy_cols = ["직접비"] + list(NATURE_COLS)
-    _LEGACY_KEYS = [f"{c}_근거" for c in _legacy_cols]
     rows = basis_rows or []
+    # 직공통비 행이 근거_csv_columns로 소스 컬럼을 커스터마이즈했다면 그 컬럼도 포함하여
+    # "{col}_근거" 키를 생성한다 — 그렇지 않으면 _tbl_basis가 조용히 빈 값으로 폴백한다.
+    _legacy_cols = ["직접비"] + list(NATURE_COLS)
+    for r in rows:
+        if r.get("type") == "직공통비":
+            for c in (r.get("근거_csv_columns") or ["직접비", "공통비"]):
+                if c not in _legacy_cols:
+                    _legacy_cols.append(c)
+    _LEGACY_KEYS = [f"{c}_근거" for c in _legacy_cols]
     has_legacy = any(
         r.get("type") in ("직공통비", "성격별분류") for r in rows
     )

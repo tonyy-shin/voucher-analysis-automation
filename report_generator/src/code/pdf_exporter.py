@@ -603,27 +603,16 @@ def _tbl_basis(cb: dict, nat: pd.DataFrame, s: dict) -> list:
         참조_text = cb.get('참조__' + ref_col, '') if ref_col else ''
 
         if row_type == '직공통비':
-            # 출력.csv의 직접비/공통비 근거 중 텍스트가 채워진 항목만 "{구분}: {텍스트}" 형식
-            di_parts = []
-            for k in ('직접비', '공통비'):
-                t = cb.get(f'{k}_근거', '').strip()
-                if t:
-                    di_parts.append(f'{k}: {t}')
+            # 조건 없이 config에 명시된 소스 컬럼(근거_csv_columns)의 근거를 항상 출력.
+            # 텍스트가 비어도 "{컬럼}: " 라벨을 표시한다. 구버전 config 폴백: 직접비/공통비.
+            di_cols = row_cfg.get('근거_csv_columns') or ['직접비', '공통비']
+            di_parts = [f"{k}: {cb.get(f'{k}_근거', '').strip()}" for k in di_cols]
             content = '<br/><br/>'.join(di_parts)
 
         elif row_type == '성격별분류':
-            # 부점 데이터 행(총계 행 제외) 기준 절댓값 합이 0이 아니고 근거 텍스트가 있는 항목만 포함.
-            # 총계 Net값이 0이더라도 상계된 부점이 존재하면 근거를 출력해야 하므로 절댓값 합으로 판단한다.
-            nat_parts = []
-            if not nat.empty:
-                dept_rows = nat[nat[COLUMN_MAP['귀속_사용부서']] != COL_TOTAL]
-                for col in NATURE_COLS:
-                    if col not in nat.columns:
-                        continue
-                    abs_sum = pd.to_numeric(dept_rows[col], errors='coerce').abs().sum()
-                    txt = cb.get(f'{col}_근거', '').strip()
-                    if abs_sum > 0 and txt:
-                        nat_parts.append(f'{col}: {txt}')
+            # 조건 없이 모든 성격 컬럼(live NATURE_COLS)의 근거를 항상 출력.
+            # 소스는 3-2 nature_cols를 자동 추적한다(d95ed6a). 빈 값도 라벨 표시.
+            nat_parts = [f"{col}: {cb.get(f'{col}_근거', '').strip()}" for col in NATURE_COLS]
             content = '<br/><br/>'.join(nat_parts)
 
         else:

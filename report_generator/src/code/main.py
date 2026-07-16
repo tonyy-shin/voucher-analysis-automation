@@ -616,7 +616,8 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
         _flush_basis_vars()
         if row_type == "직공통비":
             basis_rows_state.append(
-                {"type": "직공통비", "label": "직 • 공통비", "참조_csv_column": ""}
+                {"type": "직공통비", "label": "직 • 공통비",
+                 "근거_csv_columns": ["직접비", "공통비"], "참조_csv_column": ""}
             )
         elif row_type == "성격별분류":
             basis_rows_state.append(

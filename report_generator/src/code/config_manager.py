@@ -134,7 +134,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "section4": {
             "제목": "4. 분류 근거",
             "rows": [
-                {"type": "직공통비",   "label": "직 • 공통비", "참조_csv_column": ""},
+                {"type": "직공통비",   "label": "직 • 공통비", "근거_csv_columns": ["직접비", "공통비"], "참조_csv_column": ""},
                 {"type": "성격별분류", "label": "성격별 분류", "참조_csv_column": ""},
             ],
         },
