@@ -60,8 +60,10 @@ NATURE_COLS: list[str] = [
     "계약체결비", "계약유지비", "손해조사비", "투자관리비", "간접비", "공통비",
 ]
 
-# ── 출력.csv의 분류 근거 텍스트 컬럼 (출력전표 코드별로 행이 다름) ───────────
-# 각 컬럼 → processor.build_classification_basis()가 "{컬럼}_근거" 키로 변환
+# ── (legacy) 구버전 분류 근거 텍스트 컬럼 목록 ────────────────────────────────
+# 현재는 _preprocess_output 이 출력.csv 컬럼을 전부 보존하고, build_classification_basis
+# 가 config 에 지정된 임의 csv_column 을 직접 읽으므로 이 목록은 사용되지 않는다
+# (_get_output_cols_needed 도 미사용). 하위호환 참고용으로만 남겨 둔다.
 BASIS_TEXT_COLS: list[str] = [
     "직접비", "간접비", "공통비", "계약체결비", "계약유지비", "손해조사비", "투자관리비",
 ]

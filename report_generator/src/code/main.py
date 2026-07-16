@@ -432,7 +432,7 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             (("section3_2", "합계"), "합계 헤더"),
             (("section3_2", "설명"), "설명 문구"),
         ]),
-        # 4. 분류 근거는 정적 목록이 아닌 타입별 동적 행 편집기(_render_basis_rows)로
+        # 4. 분류 근거는 정적 목록이 아닌 균일 동적 행 편집기(_render_basis_rows)로
         # 렌더링한다. 섹션4 "제목"은 config 값으로 고정되며 이 탭에서 편집하지 않는다.
     ]
 
@@ -528,15 +528,18 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
         add_var.set("")
         _render_nature_rows()
 
-    # ── 섹션4 분류 근거(4) 동적 편집 상태 — 타입별 행 리스트 ──────────────────
+    # ── 섹션4 분류 근거(4) 동적 편집 상태 — 균일 행 리스트(label/csv_column/참조) ──────
     basis_rows_state: list[dict] = copy.deepcopy(
         config["display_labels"]["section4"].get("rows", [])
     )
-    # 필수 컬럼 삭제 가드 스냅샷 — custom 타입 행의 csv_column만 대상 (직공통비/성격별분류는
-    # 사용자 편집 가능한 csv_column 필드가 없음).
+    # csv_column 드롭다운 추천 후보 (자유 입력도 허용).
+    basis_col_options: list[str] = list(
+        config["display_labels"]["section4"].get("근거_컬럼_목록", [])
+    )
+    # 필수 컬럼 삭제 가드 스냅샷 — 모든 행의 csv_column 대상.
     _basis_locked_snapshot = [
         r for r in basis_rows_state
-        if r.get("type") == "custom" and _is_required_column(str(r.get("csv_column", "")), required_columns)
+        if _is_required_column(str(r.get("csv_column", "")), required_columns)
     ]
     basis_vars: list[dict[str, tk.StringVar]] = []   # basis_rows_state와 인덱스 정렬
     basis_frame = tk.Frame(_lbl_inner)               # _label_groups 루프 후 grid 됨
@@ -556,25 +559,23 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             w.destroy()
         basis_vars.clear()
         for idx, row in enumerate(basis_rows_state):
-            row_type = row.get("type", "custom")
             rf = tk.Frame(basis_frame)
             rf.grid(row=idx, column=0, sticky="w", padx=8, pady=2)
             var_map: dict[str, tk.StringVar] = {}
-
-            tk.Label(rf, text=f"[{row_type}]", width=9, anchor="w",
-                     fg="#2E2E38").pack(side="left")
 
             tk.Label(rf, text="라벨").pack(side="left", padx=(4, 2))
             v_label = tk.StringVar(value=str(row.get("label", "")))
             var_map["label"] = v_label
             tk.Entry(rf, textvariable=v_label, width=14).pack(side="left")
 
-            v_csv: tk.StringVar | None = None
-            if row_type == "custom":
-                tk.Label(rf, text="근거 텍스트 컬럼").pack(side="left", padx=(4, 2))
-                v_csv = tk.StringVar(value=str(row.get("csv_column", "")))
-                var_map["csv_column"] = v_csv
-                tk.Entry(rf, textvariable=v_csv, width=12).pack(side="left")
+            # 근거 소스 컬럼 — 드롭다운 추천 후보 + 자유 입력(state="normal")
+            tk.Label(rf, text="근거 컬럼").pack(side="left", padx=(4, 2))
+            v_csv = tk.StringVar(value=str(row.get("csv_column", "")))
+            var_map["csv_column"] = v_csv
+            _cur = v_csv.get().strip()
+            _opts = list(dict.fromkeys(basis_col_options + ([_cur] if _cur else [])))
+            ttk.Combobox(rf, textvariable=v_csv, values=_opts,
+                         width=14, state="normal").pack(side="left")
 
             tk.Label(rf, text="참조문서 컬럼").pack(side="left", padx=(4, 2))
             v_ref = tk.StringVar(value=str(row.get("참조_csv_column", "")))
@@ -589,13 +590,12 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             hint_lbl = tk.Label(rf, text="", fg="#888888", font=("맑은 고딕", 8))
             hint_lbl.pack(side="left", padx=(4, 0))
 
-            if v_csv is not None:
-                def _update_lock(*_args, v=v_csv, btn=del_btn, hint=hint_lbl) -> None:
-                    locked = _is_required_column(v.get(), required_columns)
-                    btn.configure(state=(tk.DISABLED if locked else tk.NORMAL))
-                    hint.configure(text="(필수 컬럼 — 삭제 불가)" if locked else "")
-                v_csv.trace_add("write", _update_lock)
-                _update_lock()
+            def _update_lock(*_args, v=v_csv, btn=del_btn, hint=hint_lbl) -> None:
+                locked = _is_required_column(v.get(), required_columns)
+                btn.configure(state=(tk.DISABLED if locked else tk.NORMAL))
+                hint.configure(text="(필수 컬럼 — 삭제 불가)" if locked else "")
+            v_csv.trace_add("write", _update_lock)
+            _update_lock()
 
             basis_vars.append(var_map)
 
@@ -612,21 +612,11 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
         del basis_rows_state[idx]
         _render_basis_rows()
 
-    def _add_basis_row(row_type: str):
+    def _add_basis_row():
         _flush_basis_vars()
-        if row_type == "직공통비":
-            basis_rows_state.append(
-                {"type": "직공통비", "label": "직 • 공통비",
-                 "근거_csv_columns": ["직접비", "공통비"], "참조_csv_column": ""}
-            )
-        elif row_type == "성격별분류":
-            basis_rows_state.append(
-                {"type": "성격별분류", "label": "성격별 분류", "참조_csv_column": ""}
-            )
-        else:
-            basis_rows_state.append(
-                {"type": "custom", "label": "", "csv_column": "", "참조_csv_column": ""}
-            )
+        basis_rows_state.append(
+            {"label": "", "csv_column": "", "참조_csv_column": ""}
+        )
         _render_basis_rows()
 
     # ── 계정 테이블/섹션1/섹션2/섹션3-1 동적 행 편집기 (_make_rows_editor 공용) ──
@@ -768,8 +758,9 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
     _r += 1
     tk.Label(
         _lbl_inner,
-        text="※ 직공통비/성격별분류 행은 기존 분류 로직을, custom 행은 출력.csv의 지정 컬럼 "
-             "첫 값을 사용합니다. 행을 삭제하면 PDF에서도 제외됩니다.",
+        text="※ 각 행은 출력.csv의 근거 컬럼 하나를 지정합니다. 해당 전표 코드의 행들에서 "
+             "그 컬럼의 빈칸이 아닌 셀을 순서대로 모아 표시합니다(셀 내용이 곧 근거 문구). "
+             "근거 컬럼은 목록에서 고르거나 직접 입력할 수 있습니다. 행을 삭제하면 PDF에서도 제외됩니다.",
         font=("맑은 고딕", 8), anchor="w", fg="#c0392b",
         wraplength=560, justify="left",
     ).grid(row=_r, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
@@ -780,12 +771,8 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
     basis_add_row = tk.Frame(_lbl_inner)
     basis_add_row.grid(row=_r, column=0, columnspan=2, sticky="w", padx=8, pady=(2, 8))
     _r += 1
-    tk.Button(basis_add_row, text="+ 직공통비 추가",
-              command=lambda: _add_basis_row("직공통비")).pack(side="left", padx=(0, 4))
-    tk.Button(basis_add_row, text="+ 성격별분류 추가",
-              command=lambda: _add_basis_row("성격별분류")).pack(side="left", padx=(0, 4))
-    tk.Button(basis_add_row, text="+ 커스텀 행 추가",
-              command=lambda: _add_basis_row("custom")).pack(side="left")
+    tk.Button(basis_add_row, text="+ 행 추가",
+              command=_add_basis_row).pack(side="left")
 
     def _dl_set(path: tuple, value: str) -> None:
         cur = config["display_labels"]
@@ -826,10 +813,10 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
                     "입력 오류", "분류 근거 행의 라벨은 비울 수 없습니다.", parent=dlg
                 )
                 return
-            if row.get("type") == "custom" and not str(row.get("csv_column", "")).strip():
+            if not str(row.get("csv_column", "")).strip():
                 messagebox.showwarning(
                     "입력 오류",
-                    "커스텀 분류 근거 행에는 CSV 컬럼명을 입력해야 합니다.",
+                    "분류 근거 행에는 근거 컬럼명을 입력해야 합니다.",
                     parent=dlg,
                 )
                 return
@@ -886,7 +873,7 @@ def _show_theme_dialog(root: tk.Tk, theme: CompanyTheme, config: dict) -> Compan
             ("대상정의(1) 행", _sec1_locked_snapshot, sec1_rows_state),
             ("부점귀속(2) 그룹", _sec2_locked_snapshot, sec2_groups_state),
             ("성격 컬럼(3-2)", _nature_locked_snapshot, nature_vars),
-            ("분류 근거(4) 커스텀 행", _basis_locked_snapshot, basis_rows_state),
+            ("분류 근거(4) 행", _basis_locked_snapshot, basis_rows_state),
         ]
         for sec_name, snapshot, current_list in _locked_snapshots:
             missing = [row for row in snapshot if row not in current_list]

@@ -20,9 +20,9 @@ from data_loader import (
 )
 
 
-# ── 분류 근거 텍스트 — 출력.csv 전체에서 컬럼별 첫 non-empty 행으로 생성 ──────
+# ── 분류 근거 텍스트 — 주어진 DataFrame에서 컬럼별 첫 non-empty 값 추출 (참조 컬럼용) ──
 def _first_nonempty(df_output: pd.DataFrame, col: str) -> str:
-    """df_output[col] 전체에서 non-empty(NaN/""/nan/none/None 제외) 첫 값을 반환한다."""
+    """df_output[col]에서 non-empty(NaN/""/nan/none/None 제외) 첫 값을 반환한다."""
     if col not in df_output.columns:
         return ""
     series = df_output[col].dropna().astype(str).str.strip()
@@ -33,71 +33,53 @@ def _first_nonempty(df_output: pd.DataFrame, col: str) -> str:
 def build_classification_basis(
     df_output: pd.DataFrame | None,
     basis_rows: list[dict],
-) -> dict[str, str]:
+    keyword: str,
+) -> dict[str, object]:
     """
-    섹션4 분류 근거 dict를 생성한다 — legacy 키 + custom 키를 단일 dict로 병합 반환.
+    섹션4 분류 근거 dict를 생성한다 — 모든 행 동일한 단일 메커니즘.
 
-    legacy(직공통비/성격별분류) 행은 "직접비" + NATURE_COLS(현재 값) 컬럼별 첫
-    non-empty 텍스트를 "{컬럼}_근거" 키로 매핑한다(pdf_exporter._tbl_basis가 참조).
-    NATURE_COLS는 사용자가 3-2 편집기에서 변경 가능하므로 매 호출 시점의 값을 그대로
-    반영한다 — 정적 목록을 쓰면 카테고리 추가/변경 시 근거 텍스트가 조용히 누락된다.
-    단, basis_rows에 type이 "직공통비" 또는 "성격별분류"인 행이 하나라도 있을 때만
-    legacy 키를 생성한다.
+    각 행은 소스 컬럼(csv_column) 하나를 지정한다. 현재 keyword(출력전표)로 출력.csv를
+    필터링한 뒤, 필터된 행을 원래 순서대로 순회하며 그 컬럼의 non-empty 셀을 전부 수집해
+    리스트로 저장한다(pdf_exporter._tbl_basis가 <br/><br/>로 결합). 셀 값은 이미
+    "라벨: 내용" 완성형이므로 코드는 라벨을 조합하지 않으며, 빈 셀은 건너뛴다.
 
-    custom 행은 row["csv_column"]이 비어 있지 않고 df_output에 존재하면, 해당 컬럼
-    전체의 첫 non-empty 값을 cb[csv_column] 키로 저장한다.
+    참조(참조_csv_column) 값도 동일하게 keyword로 필터한 뒤 첫 non-empty 값을 쓴다.
+    content 키(csv_column)와 충돌하지 않도록 "참조__" 접두사를 붙인다.
 
     Args:
-        df_output:  출력.csv 전체 DataFrame (없거나 비어 있으면 빈/빈값 dict 반환)
-        basis_rows: config display_labels.section4.rows (타입별 행 설정 리스트)
+        df_output:  출력.csv 전체 DataFrame (없거나 비어 있으면 빈 dict 반환)
+        basis_rows: config display_labels.section4.rows (label/csv_column/참조_csv_column)
+        keyword:    현재 출력전표 코드 — 이 코드에 해당하는 출력.csv 행만 대상으로 한다
 
     Returns:
-        {"직접비_근거": str, ...(legacy), <csv_column>: str, ...(custom)}
+        {<csv_column>: list[str] (수집된 셀), "참조__<ref>": str, ...}
     """
-    # NATURE_COLS는 data_loader._apply_config_overrides가 in-place로 갱신하는 라이브
-    # 리스트이므로, 정적 상수로 미리 굳히지 않고 매 호출마다 현재 값으로 계산한다.
     rows = basis_rows or []
-    # 직공통비 행이 근거_csv_columns로 소스 컬럼을 커스터마이즈했다면 그 컬럼도 포함하여
-    # "{col}_근거" 키를 생성한다 — 그렇지 않으면 _tbl_basis가 조용히 빈 값으로 폴백한다.
-    _legacy_cols = ["직접비"] + list(NATURE_COLS)
+    basis: dict[str, object] = {}
+
+    if df_output is None or df_output.empty:
+        return basis
+
+    # keyword(출력전표)로 출력.csv 행을 필터 — 코드당 여러 행을 원래 순서대로 유지한다.
+    out_col = COLUMN_MAP["출력전표"]
+    kw = str(keyword or "").strip()
+    if out_col in df_output.columns and kw:
+        sub = df_output[df_output[out_col].astype(str).str.strip() == kw]
+    else:
+        sub = df_output
+
     for r in rows:
-        if r.get("type") == "직공통비":
-            for c in (r.get("근거_csv_columns") or ["직접비", "공통비"]):
-                if c not in _legacy_cols:
-                    _legacy_cols.append(c)
-    _LEGACY_KEYS = [f"{c}_근거" for c in _legacy_cols]
-    has_legacy = any(
-        r.get("type") in ("직공통비", "성격별분류") for r in rows
-    )
+        # content — 소스 컬럼의 non-empty 셀을 순서대로 수집 (빈 셀 skip)
+        csv_col = r.get("csv_column", "")
+        if csv_col and csv_col in sub.columns:
+            cells = sub[csv_col].dropna().astype(str).str.strip()
+            cells = cells[~cells.isin(["", "nan", "none", "None"])]
+            basis[csv_col] = cells.tolist()
 
-    empty_df = df_output is None or df_output.empty
-
-    basis: dict[str, str] = {}
-
-    # legacy 키 — 해당 타입 행이 존재할 때만 생성
-    if has_legacy:
-        if empty_df:
-            basis.update({k: "" for k in _LEGACY_KEYS})
-        else:
-            for col in _legacy_cols:
-                basis[f"{col}_근거"] = _first_nonempty(df_output, col)
-
-    # custom 키 — csv_column 으로 지정한 컬럼의 첫 non-empty 값
-    if not empty_df:
-        for r in rows:
-            if r.get("type") != "custom":
-                continue
-            csv_col = r.get("csv_column", "")
-            if csv_col and csv_col in df_output.columns:
-                basis[csv_col] = _first_nonempty(df_output, csv_col)
-
-    # 참조 키 — 모든 행 공통. 참조_csv_column 으로 지정한 컬럼의 첫 non-empty 값.
-    # content 키(csv_column / {col}_근거)와 충돌하지 않도록 "참조__" 접두사를 사용한다.
-    if not empty_df:
-        for r in rows:
-            ref_col = r.get("참조_csv_column", "")
-            if ref_col and ref_col in df_output.columns:
-                basis["참조__" + ref_col] = _first_nonempty(df_output, ref_col)
+        # 참조 — keyword 필터 후 첫 non-empty 값
+        ref_col = r.get("참조_csv_column", "")
+        if ref_col and ref_col in sub.columns:
+            basis["참조__" + ref_col] = _first_nonempty(sub, ref_col)
 
     return basis
 
@@ -653,8 +635,8 @@ def run_pipeline(
         if e.get("csv_column")
     ))
 
-    # ── 분류 근거: 섹션4 행 설정(basis_rows) 기준 legacy + custom 텍스트 추출 ──
-    classification_basis = build_classification_basis(df_output, basis_rows)
+    # ── 분류 근거: 섹션4 행 설정 기준, 이 keyword의 출력.csv 행에서 근거 텍스트 수집 ──
+    classification_basis = build_classification_basis(df_output, basis_rows, keyword)
 
     # Step 1 — 필터링
     df_filtered = filter_by_keyword(df_actual, keyword)

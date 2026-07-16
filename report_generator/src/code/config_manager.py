@@ -126,16 +126,18 @@ _DEFAULT_CONFIG: dict[str, Any] = {
                 "계약체결비", "계약유지비", "손해조사비", "투자관리비", "간접비", "공통비",
             ],
         },
-        # 섹션4 분류 근거는 타입별 동적 행 시스템.
-        #   - 직공통비   : cb의 직접비/공통비 근거로 렌더 (legacy 로직)
-        #   - 성격별분류 : nat 절댓값 합 필터링으로 렌더 (legacy 로직)
-        #   - custom     : csv_column 으로 지정한 출력.csv 컬럼의 첫 non-empty 값
+        # 섹션4 분류 근거 — 모든 행이 동일한 단일 메커니즘.
+        #   각 행은 csv_column(출력.csv 컬럼 하나)을 지정하고, 현재 출력전표로 필터한
+        #   출력.csv 행들에서 그 컬럼의 non-empty 셀을 순서대로 수집해 렌더한다.
+        #   셀 값은 이미 "라벨: 내용" 완성형이며 빈 셀은 건너뛴다.
+        # 근거_컬럼_목록 : 문구 설정 탭의 csv_column 드롭다운 추천 후보 (자유 입력도 허용).
         # rows 는 "문구 설정" 탭에서 추가/삭제/편집되며, 행 삭제 시 PDF에서도 제거된다.
         "section4": {
             "제목": "4. 분류 근거",
+            "근거_컬럼_목록": ["직공통비", "성격별분류"],
             "rows": [
-                {"type": "직공통비",   "label": "직 • 공통비", "근거_csv_columns": ["직접비", "공통비"], "참조_csv_column": ""},
-                {"type": "성격별분류", "label": "성격별 분류", "참조_csv_column": ""},
+                {"label": "직 • 공통비", "csv_column": "직공통비",   "참조_csv_column": ""},
+                {"label": "성격별 분류", "csv_column": "성격별분류", "참조_csv_column": ""},
             ],
         },
     },
@@ -299,11 +301,15 @@ def _discard_legacy_section4(loaded: dict) -> None:
 
 
 def _normalize_section4_rows(loaded: dict) -> None:
-    """구버전 행의 "참조" 키를 폐기하여 새 "참조_csv_column" 스키마로 정규화한다.
+    """구버전 section4 행을 타입 없는 균일 스키마(label/csv_column/참조_csv_column)로 정규화한다.
 
-    각 section4 행은 정적 텍스트 "참조" 대신 출력.csv 컬럼명("참조_csv_column")을 갖는다.
-    로드된 행이 "참조" 키만 가지고 "참조_csv_column" 키가 없으면, "참조" 값을 조용히 버리고
-    "참조_csv_column"은 빈 문자열("")로 둔다(_deep_merge 시 기본값 폴백). 병합 전에 호출한다.
+    - 정적 텍스트 "참조" 키만 있으면 폐기한다(→ 참조_csv_column 기본값 폴백).
+    - 타입 기반 행(type="직공통비"/"성격별분류"/"custom", 근거_csv_columns)을 마이그레이션한다:
+        직공통비   → csv_column="직공통비" (csv_column 미지정 시)
+        성격별분류 → csv_column="성격별분류" (csv_column 미지정 시)
+        custom/기타 → csv_column 그대로 유지
+      "type"·"근거_csv_columns" 키는 제거한다.
+    병합(_deep_merge) 전에 호출한다.
     """
     dl = loaded.get("display_labels")
     if not isinstance(dl, dict):
@@ -315,8 +321,16 @@ def _normalize_section4_rows(loaded: dict) -> None:
     if not isinstance(rows, list):
         return
     for row in rows:
-        if isinstance(row, dict) and "참조" in row and "참조_csv_column" not in row:
+        if not isinstance(row, dict):
+            continue
+        if "참조" in row and "참조_csv_column" not in row:
             del row["참조"]
+        row_type = row.pop("type", None)
+        row.pop("근거_csv_columns", None)
+        if row_type == "직공통비" and not row.get("csv_column"):
+            row["csv_column"] = "직공통비"
+        elif row_type == "성격별분류" and not row.get("csv_column"):
+            row["csv_column"] = "성격별분류"
 
 
 def _resolve_csv_col(loaded: dict, logical_key: str) -> str:

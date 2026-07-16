@@ -218,7 +218,7 @@ def _build_story(results: dict, s: dict, fn: str, fb: str, logo_max_height: int 
     story.extend(_tbl_dept(dept_dfs, s, fb));        story.append(gap)
     story.extend(_tbl_nature_31(di, s));             story.append(Spacer(1, 2))
     story.extend(_tbl_nature_32(nat, s, fb));        story.append(gap)
-    story.extend(_tbl_basis(cb, nat, s));            story.append(gap)
+    story.extend(_tbl_basis(cb, s));                 story.append(gap)
     story.append(_tbl_footer(s))
     return story
 
@@ -586,38 +586,21 @@ def _tbl_nature_32(nat: pd.DataFrame, s: dict, fb: str) -> list:
 
 # ── [H] 4. 분류 근거 ───────────────────────────────────────────────────────────
 
-def _tbl_basis(cb: dict, nat: pd.DataFrame, s: dict) -> list:
-    # 타입별 동적 행 렌더러 — config display_labels.section4.rows 기준.
-    #   직공통비   : cb의 직접비/공통비 근거 (legacy 로직)
-    #   성격별분류 : 부점 데이터 절댓값 합 필터링 (legacy 로직)
-    #   custom     : cb[csv_column] (필터링 없음)
-    # 행이 삭제되면 PDF에서도 제외된다. 모든 행이 삭제되면 제목만 출력한다.
+def _tbl_basis(cb: dict, s: dict) -> list:
+    # 단일 경로 행 렌더러 — config display_labels.section4.rows 기준.
+    # 모든 행은 label / csv_column / 참조_csv_column 만 가진다. content 는
+    # build_classification_basis 가 keyword로 수집한 cb[csv_column] (셀 리스트)를
+    # <br/><br/>로 결합한 값이다. 행이 삭제되면 PDF에서도 제외된다.
     L = s['labels']['section4']
     rows_cfg = L.get('rows', [])
 
     data = []
     for row_cfg in rows_cfg:
-        row_type = row_cfg.get('type', 'custom')
         label    = row_cfg.get('label', '')
+        csv_col  = row_cfg.get('csv_column', '')
         ref_col   = row_cfg.get('참조_csv_column', '')
+        content  = '<br/><br/>'.join(cb.get(csv_col, []))
         참조_text = cb.get('참조__' + ref_col, '') if ref_col else ''
-
-        if row_type == '직공통비':
-            # 조건 없이 config에 명시된 소스 컬럼(근거_csv_columns)의 근거를 항상 출력.
-            # 텍스트가 비어도 "{컬럼}: " 라벨을 표시한다. 구버전 config 폴백: 직접비/공통비.
-            di_cols = row_cfg.get('근거_csv_columns') or ['직접비', '공통비']
-            di_parts = [f"{k}: {cb.get(f'{k}_근거', '').strip()}" for k in di_cols]
-            content = '<br/><br/>'.join(di_parts)
-
-        elif row_type == '성격별분류':
-            # 조건 없이 모든 성격 컬럼(live NATURE_COLS)의 근거를 항상 출력.
-            # 소스는 3-2 nature_cols를 자동 추적한다(d95ed6a). 빈 값도 라벨 표시.
-            nat_parts = [f"{col}: {cb.get(f'{col}_근거', '').strip()}" for col in NATURE_COLS]
-            content = '<br/><br/>'.join(nat_parts)
-
-        else:
-            csv_col = row_cfg.get('csv_column', '')
-            content = cb.get(csv_col, '')
 
         data.append([
             _P(label,     s['bold']),
